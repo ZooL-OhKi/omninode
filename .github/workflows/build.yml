@@ -26,8 +26,9 @@ jobs:
         run: go install github.com/wailsapp/wails/v2/cmd/wails@latest
 
       - name: Build OmniClient
-        working-directory: omniclient
-        run: wails build -platform windows/amd64 -ldflags="-s -w" -o OmniClient.exe
+        run: |
+          cd omniclient
+          wails build -platform windows/amd64 -ldflags="-s -w" -o OmniClient.exe
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2

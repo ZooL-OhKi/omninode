@@ -1,0 +1,14 @@
+# General
+.DS_Store
+.env
+secret.key
+
+# Python (Node 1)
+__pycache__/
+*.py[cod]
+node1-gateway/venv/
+
+# Go / Wails (OmniClient)
+omniclient/build/bin/
+omniclient/frontend/node_modules/
+omniclient/*.exe

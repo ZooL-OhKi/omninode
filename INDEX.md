@@ -1,128 +1,62 @@
-# Omninode - Decentralized AI Compute Fabric
+# Omninode project index
 
-Omninode is a cloud-only decentralized and zero-cost system designed to
-provide operational infrastructure for Artificial Intelligence systems.
+## Purpose
 
-The project allows AI systems to act in the digital world by using tools such
-as web browsing and sandboxed code execution.
+Omninode hosts autonomous AI residents on always-on Oracle servers. The resident AI is the operator of its environment: it can plan and execute work using node resources, files, code, processes, browser sessions, and local tools within explicit runtime capabilities and security policies.
 
-## Project Status
+## Read first
 
-Current development is focused on the omniclient module:
+1. `README.md` — mission and quick orientation.
+2. `PROJECT_HANDOVER.md` — current state and continuation procedure.
+3. `ARCHITECTURE.md` — components and data flow.
+4. `SECURITY.md` — capabilities, isolation, secrets, browser and high-risk actions.
+5. `ROADMAP.md` — ordered engineering work.
 
-    /omniclient
+## Components
 
-Omniclient is a hybrid application with two operating modes:
+- `omniclient/`: Go HTTP gateway client and MCP server integration.
+- `node1-gateway/`: FastAPI HTTP gateway and MQTT task dispatcher.
+- MQTT broker: request/reply transport.
+- Oracle nodes: resident AI workers.
+- Browser runtime: planned controlled web capability.
 
-1. Graphical interface:
-   Wails with Go and a web frontend.
+## Current flow
 
-2. MCP server:
-   Exposes Omninode tools to local AI clients through the MCP stdio
-   interface.
+1. A client calls the authenticated gateway.
+2. The gateway validates the request and selects an online node.
+3. The gateway publishes a task over MQTT with correlation data.
+4. A worker executes the task and publishes a result.
+5. The gateway resolves the pending task, cleans it up, and returns the result.
 
-## Important Documentation Rule
+## Current baseline
 
-Before changing code, read this file:
+- Synchronous MQTT Request-Reply exists in `mqtt_service.py`.
+- `POST /api/v1/browse` exists in `main.py`.
+- The gateway uses `x-omninode-key` and `OMNINODE_API_KEY`.
+- The Go Browse client is covered by a local `httptest.NewServer` test.
+- Go formatting, tests, and vet must remain clean.
+- Python compile/import are verified; Python test discovery currently reports `no tests ran` unless tests are added.
 
-    omniclient/HANDOFF.md
+## Before changing code
 
-The handoff describes the current architecture, file ownership rules, MCP
-patterns, known limitations, and next tasks.
+```powershell
+Set-Location A:\omninode
+Get-Content .\README.md
+Get-Content .\PROJECT_HANDOVER.md
+Get-Content .\ARCHITECTURE.md
+Get-Content .\SECURITY.md
+Get-Content .\ROADMAP.md
+git status --short
+git diff --stat
+```
 
-Do not invent new core structures before reading the handoff.
+Do not discard local changes. Do not commit or push without explicit approval.
 
-## Environment
+## Immediate next work
 
-- Go: 1.23 or later
-- MCP SDK: github.com/modelcontextprotocol/go-sdk
-- Wails: github.com/wailsapp/wails/v2
-- Operating system: Windows, Linux, or macOS
-
-## Core File Ownership
-
-The core implementation is intentionally divided into three Go files:
-
-- main.go
-  Dual GUI and CLI entrypoint.
-
-- gateway_client.go
-  Network abstraction, Gateway interface, result structures, and
-  HTTPGateway implementation.
-
-- mcp_server.go
-  MCP server, OmninodeGateway wrapper, tool input/output structures,
-  handlers, tool registration, and MCP stdio startup.
-
-Do not duplicate structures between these files.
-
-Do not create additional Go files for core logic unless the architecture is
-explicitly revised.
-
-## Current Tools
-
-The current MCP tools are:
-
-- restart_node
-- run_sandbox_code
-- browse_webpage
-
-The tool implementations use typed input and output structures and JSON
-schema reflection through struct tags.
-
-## Quick Start
-
-From the repository root:
-
-    cd omniclient
-    go mod tidy
-    go build -o omniclient
-    .\omniclient.exe --mcp-stdio
-
-For a normal Wails GUI launch:
-
-    .\omniclient.exe
-
-## Current Known Limitations
-
-1. StartMCPStdio is currently held with a blocking select statement.
-   It must be replaced with the correct MCP SDK stdio transport setup.
-
-2. HTTPGateway is currently mocked or incomplete.
-   Real HTTP or gRPC communication with the Omninode fabric still needs to
-   be implemented.
-
-3. The exact gateway API contract must be defined before replacing the mock
-   implementation.
-
-## Recommended Next Tasks
-
-Work in this order:
-
-1. Read omniclient/HANDOFF.md.
-2. Verify the current build with go build ./....
-3. Implement real MCP stdio transport in mcp_server.go.
-4. Add tests for MCP startup and tool registration.
-5. Define the gateway API contract.
-6. Replace HTTPGateway stubs with real network calls.
-7. Add integration tests using a local mock gateway.
-
-## Validation Commands
-
-    cd omniclient
-    go mod tidy
-    go build ./...
-    go test ./...
-
-Do not claim that MCP stdio is operational until the stdio transport has been
-tested with an MCP client.
-
-## Handoff Confirmation
-
-After reading this file and omniclient/HANDOFF.md, report:
-
-- the Go version;
-- the MCP SDK version from go.mod;
-- whether go build ./... passes;
-- whether StartMCPStdio uses a real transport or a temporary blocker;
-- which core file should be modified for the requested task.
+- Add broker-backed MQTT integration tests.
+- Version the RPC request/response schema.
+- Test late replies, duplicate replies, timeout cleanup, reconnects, and concurrent tasks.
+- Define capability and policy objects.
+- Design the browser runtime using standard Chromium, Playwright/CDP, isolated profiles, and protected CDP.
+- Add controlled filesystem and sandbox services before exposing arbitrary execution.

@@ -1,4 +1,4 @@
-github.com/modelcontextprotocol/go-sdk v0.2.0 h1:Kh+H5Y5l5fE5h3G2T9YQMXkE5ANgK2Hx4GJ0qHxQ7E=
-github.com/modelcontextprotocol/go-sdk v0.2.0/go.mod h1:AEU1mMaJi2JbQhPqj5RjNqkdK8B2i3JcGq8q8G9mYc=
-github.com/wailsapp/wails/v2 v2.8.0 h1:34m1x7V2Gt9m7K9k0YrRvL0KXhKdmRiYJhKvFJJsJc=
-github.com/wailsapp/wails/v2 v2.8.0/go.mod h1:4Kv8WX3BwZ9L8rRqKlHmJqXxRmXk8B8Kq3k5b8l2g=
+github.com/modelcontextprotocol/go-sdk v0.2.0 h1:PESNYOmyM1c369tRkzXLY5hHrazj8x9CY1Xu0fLCryM=
+github.com/modelcontextprotocol/go-sdk v0.2.0/go.mod h1:90bPvCzGHl5f4vJkM8JHcBx7GqRzqHJQJBJ36u7Hf3g=
+github.com/wailsapp/wails/v2 v2.8.0 h1:Rr8xP3FqGzRfL5bJLXNq4J8RqRvJkHqjN5fJZqJvJc=
+github.com/wailsapp/wails/v2 v2.8.0/go.mod h1:lT5hFqXpS0HqM4F1Y8J0TJqKqGq8G9mYc=

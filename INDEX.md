@@ -34,10 +34,8 @@ Omninode hosts autonomous AI residents on always-on Oracle servers. The resident
 - `POST /api/v1/browse` exists in `main.py`.
 - The gateway uses `x-omninode-key` and `OMNINODE_API_KEY`.
 - The Go Browse client is covered by a local `httptest.NewServer` test.
-- Go formatting, tests, and vet pass locally.
-- Python gateway tests pass locally after installing `httpx2`.
-- Python compilation and import pass locally.
-- MQTT broker-backed integration tests and `go test -race ./...` remain pending.
+- Go formatting, tests, and vet must remain clean.
+- Python compile/import are verified; Python test discovery currently reports `no tests ran` unless tests are added.
 
 ## Before changing code
 

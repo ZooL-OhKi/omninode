@@ -3,12 +3,31 @@ import logging
 import os
 import threading
 import time
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from typing import Any
 
 import paho.mqtt.client as mqtt
 
 logger = logging.getLogger(__name__)
+
+
+class TaskTimeoutError(Exception):
+    pass
+
+
+class TaskRemoteError(Exception):
+    pass
+
+
+class TaskPublishError(Exception):
+    pass
+
+
+@dataclass
+class PendingTask:
+    event: threading.Event = field(default_factory=threading.Event)
+    result: dict[str, Any] | None = None
+    error: str | None = None
 
 
 @dataclass
@@ -32,6 +51,7 @@ class MQTTService:
         self.tls_enabled = os.getenv("MQTT_TLS_ENABLED", "false").lower() == "true"
         self.node_ttl = int(os.getenv("NODE_TTL_SECONDS", "90"))
         self.nodes: dict[str, NodeRecord] = {}
+        self.pending_tasks: dict[str, PendingTask] = {}
         self._lock = threading.RLock()
         self.client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id="omninode-node1-gateway")
         self.client.reconnect_delay_set(min_delay=1, max_delay=30)
@@ -82,7 +102,27 @@ class MQTTService:
         if event in {"heartbeat", "status"}:
             self.update_node(node_id, payload)
         elif event == "results":
-            logger.info("Task result received from node %s", node_id)
+            task_id = payload.get("task_id")
+            status = payload.get("status")
+            if not task_id or not status:
+                logger.warning("Discarding result payload missing task_id or status from %s", node_id)
+                return
+
+            with self._lock:
+                pending = self.pending_tasks.get(task_id)
+
+            if pending:
+                if status == "completed":
+                    pending.result = payload
+                elif status == "error":
+                    err_info = payload.get("error")
+                    if isinstance(err_info, dict):
+                        pending.error = err_info.get("message", "unknown remote error")
+                    else:
+                        pending.error = str(err_info or "unknown remote error")
+                pending.event.set()
+            else:
+                logger.info("Task result received from node %s for unknown task_id %s", node_id, task_id)
 
     def update_node(self, node_id: str, payload: dict[str, Any]) -> None:
         status = str(payload.get("status", "online"))
@@ -138,6 +178,45 @@ class MQTTService:
         if info.rc != mqtt.MQTT_ERR_SUCCESS:
             raise RuntimeError("unable to publish task to MQTT broker")
         return {"status": "dispatched", "node_id": node_id, **envelope}
+
+    def dispatch_task_sync(self, node_id: str, task_type: str, payload: dict[str, Any], timeout: float) -> dict[str, Any]:
+        node = self.get_node(node_id)
+        if node is None:
+            raise KeyError(node_id)
+        if node["status"] == "offline":
+            raise RuntimeError(f"node {node_id} is offline")
+
+        task_id = f"task-{int(time.time() * 1000)}"
+        envelope = {
+            "task_id": task_id,
+            "task_type": task_type,
+            "payload": payload,
+            "submitted_at": int(time.time()),
+        }
+
+        pending = PendingTask()
+        with self._lock:
+            self.pending_tasks[task_id] = pending
+
+        try:
+            info = self.client.publish(
+                f"omninode/nodes/{node_id}/tasks",
+                json.dumps(envelope, separators=(",", ":")),
+                qos=1,
+            )
+            if info.rc != mqtt.MQTT_ERR_SUCCESS:
+                raise TaskPublishError("unable to publish task to MQTT broker")
+
+            if not pending.event.wait(timeout):
+                raise TaskTimeoutError("task execution timed out")
+
+            if pending.error:
+                raise TaskRemoteError(pending.error)
+
+            return pending.result or {}
+        finally:
+            with self._lock:
+                self.pending_tasks.pop(task_id, None)
 
     def fabric_health(self) -> dict[str, Any]:
         nodes = self.get_nodes()

@@ -47,6 +47,9 @@ func (a *App) startup(ctx context.Context) {
 }
 
 func main() {
+	// Forza tutti i log diagnostici su Stderr per non corrompere lo stream MCP
+	log.SetOutput(os.Stderr)
+
 	if len(os.Args) > 1 && os.Args[1] == "--mcp-stdio" {
 		if err := NewOmninodeServer().StartMCPStdio(); err != nil {
 			log.Fatalf("MCP stdio error: %v", err)

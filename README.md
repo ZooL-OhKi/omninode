@@ -44,7 +44,7 @@ Set-Location A:\omninode\node1-gateway
 & .\venv\Scripts\python.exe -c "import main; print('main import OK')"
 ```
 
-The current local baseline has passing Go tests, passing initial Python gateway tests, successful Python compilation/import, and no generated binary in the working tree. MQTT broker-backed end-to-end coverage and the Go race detector still require a dedicated environment.
+At the current baseline, Python compilation and import are verified, but no Python tests are currently detected if pytest reports `no tests ran`.
 
 ## Roadmap
 

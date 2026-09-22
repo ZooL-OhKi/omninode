@@ -1,6 +1,7 @@
 package main
 
 import (
+    "context"
     "embed"
     "fmt"
     "log"
@@ -37,7 +38,7 @@ func (a *App) GetFabricHealth() map[string]interface{} {
     return map[string]interface{}{"health_status": "local-fallback", "total_nodes": 0, "online_nodes": 0}
 }
 
-func (a *App) startup() {
+func (a *App) startup(ctx context.Context) {
     if a.mcpServer.gateway == nil {
         log.Println("Node1 Gateway not configured; MCP uses local fallback mode")
         return

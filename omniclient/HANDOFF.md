@@ -1,485 +1,409 @@
-# Omninode MCP Client - Complete Handoff Guide
+# Omniclient - AI Handoff and Architecture Guide
 
-**For:** AI assistants and developers starting from zero
-**Date:** 2026-09-22
-**Status:** CI PASSING - Stable build
-**Repo:** https://github.com/ZooL-OhKi/omninode
-**Path:** omniclient/
+## Purpose
 
----
+Omniclient is the desktop and CLI component of Omninode.
 
-## TABLE OF CONTENTS
+It connects:
 
-1. Overview
-2. Architecture
-3. Quick Start (5 min)
-4. Full Setup (step-by-step)
-5. MCP SDK API Reference
-6. Troubleshooting
-7. Testing
-8. Development Workflow
+    User <-> Local AI client <-> MCP server <-> Omninode fabric
 
----
+The application has two modes:
 
-## 1. OVERVIEW
+1. Wails GUI mode.
+2. MCP stdio server mode, selected with:
 
-This is an MCP (Model Context Protocol) client for Omninode - a distributed
-computational node system. It exposes 4 tools via MCP:
+       --mcp-stdio
 
-1. list_nodes - List all connected nodes
-2. get_node_status - Get status of a specific node
-3. dispatch_task - Dispatch computational tasks to nodes
-4. get_fabric_health - Get overall fabric health
+The objective is to expose practical tools that allow an AI system to work
+with the distributed Omninode fabric.
 
----
+## Golden Rules
 
-## 2. ARCHITECTURE
+Follow these rules before modifying code:
 
-```
-omniclient/
-├── main.go              # Entry point, starts MCP stdio server
-├── mcp_server.go        # MCP server with 4 registered tools
-├── gateway_client.go    # HTTP client for Omninode Gateway API
-├── go.mod               # Go dependencies (MCP SDK v1.8.1+)
-├── go.sum               # Verified checksums
-└── wails.json           # Wails config (hybrid UI)
-```
+1. Read this file completely.
+2. Inspect the existing definitions before adding new ones.
+3. Do not duplicate structs.
+4. Do not create additional Go files for core logic.
+5. Keep network code in gateway_client.go.
+6. Keep MCP code in mcp_server.go.
+7. Keep process startup and Wails setup in main.go.
+8. Do not assume that a gateway method exists. Verify its interface first.
+9. Do not claim that a feature is operational until it has been tested.
+10. Preserve ASCII-only documentation when editing handoff files.
 
-### Key Dependencies
+## Core File Map
 
-```
-github.com/modelcontextprotocol/go-sdk v1.8.1+  # MCP SDK
-github.com/wailsapp/wails/v2 v2.9.0             # UI framework
-```
+### main.go
 
-### Data Flow
+Responsibilities:
 
-```
-MCP Client (LLM) <-> MCP Server (this code) <-> Gateway API <-> Nodes
-```
+- Define the package entrypoint.
+- Parse command-line arguments.
+- Start MCP stdio mode when --mcp-stdio is present.
+- Start the Wails GUI otherwise.
+- Connect GUI-facing objects to the gateway abstraction.
+- Call FabricHealth only through the gateway interface exposed by the
+  current architecture.
 
----
+Do not place MCP tool definitions or HTTP request code here.
 
-## 3. QUICK START (5 MINUTES)
+### gateway_client.go
 
-```bash
-# 1. Clone
-git clone https://github.com/ZooL-OhKi/omninode
-cd omninode/omniclient
+Responsibilities:
 
-# 2. Dependencies
-go mod download
-go mod verify
+- Define the Gateway interface.
+- Define transport-level result structures.
+- Define BrowseResult and ExecuteResult.
+- Define HTTPGateway.
+- Implement or mock network communication with the Omninode fabric.
+- Keep transport errors and HTTP details in this file.
 
-# 3. Environment
-export OMNINODE_GATEWAY_URL="https://gateway.omninode.io"
-export OMNINODE_API_KEY="your-api-key"
+Do not place MCP server registration or tool handlers here.
 
-# 4. Build and run
-go build ./...
-go run .
-```
+The current architecture expects definitions similar to:
 
-If it builds without errors, you're ready!
-
----
-
-## 4. FULL SETUP (STEP-BY-STEP)
-
-### Prerequisites
-
-- Go 1.23 or later
-- Git
-- Access to Omninode Gateway (URL + API key)
-
-### Step 1: Verify Go Version
-
-```bash
-go version
-# Must be: go version go1.23.x or later
-```
-
-### Step 2: Clone Repository
-
-```bash
-git clone https://github.com/ZooL-OhKi/omninode
-cd omninode/omniclient
-```
-
-### Step 3: Download Dependencies
-
-```bash
-go mod download
-go mod verify
-# Should output: all modules verified
-```
-
-### Step 4: Configure Environment
-
-Create a .env file or export variables:
-
-```bash
-export OMNINODE_GATEWAY_URL="https://gateway.omninode.io"
-export OMNINODE_API_KEY="your-api-key-here"
-```
-
-### Step 5: Build
-
-```bash
-go build ./...
-# Should complete with no output (no errors)
-```
-
-### Step 6: Run
-
-```bash
-go run .
-# Server starts, waits for MCP connections on stdio
-```
-
-### Step 7: Verify CI
-
-Go to: https://github.com/ZooL-OhKi/omninode/actions
-
-All checks should be green (passing).
-
----
-
-## 5. MCP SDK API REFERENCE
-
-### 5.1 Creating MCP Server
-
-```go
-import "github.com/modelcontextprotocol/go-sdk/mcp"
-
-s.mcpServer = mcp.NewServer(&mcp.Implementation{
-    Name:    "omninode",
-    Version: "0.1.0",
-}, nil)
-```
-
-**Key points:**
-- Use `&mcp.Implementation{}` (NOT `&mcp.ServerOptions{}`)
-- Second parameter is `nil` for default config
-
-### 5.2 Registering Tools
-
-```go
-mcp.AddTool(s.mcpServer, &mcp.Tool{
-    Name:        "list_nodes",
-    Description: "List all connected nodes",
-    InputSchema: json.RawMessage(`{"type":"object"}`),
-}, s.handleListNodes)
-```
-
-**Key points:**
-- Use `mcp.AddTool(server, &Tool{...}, handler)` (package function)
-- InputSchema: use `json.RawMessage(...)` with JSON string
-- Handler: method on your server struct
-
-### 5.3 Handler Signature
-
-```go
-func (s *OmninodeServer) handleListNodes(
-    ctx context.Context,
-    req *mcp.CallToolRequest,
-) (*mcp.CallToolResult, error) {
-    // Parse arguments from req.Params.Arguments (json.RawMessage)
-    var args struct {
-        NodeID string `json:"node_id"`
+    type Gateway interface {
+        ...
     }
-    if err := json.Unmarshal(req.Params.Arguments, &args); err != nil {
-        return nil, err
+
+    type ExecuteResult struct {
+        ...
     }
-    
-    // Your logic here
-    result := map[string]any{"nodes": []string{"node1", "node2"}}
-    
-    // Return result
-    return &mcp.CallToolResult{
-        Content: []mcp.Content{
-            &mcp.TextContent{Text: string(mustJSON(result))},
+
+    type BrowseResult struct {
+        ...
+    }
+
+    type HTTPGateway struct {
+        ...
+    }
+
+Verify the exact current definitions before using or extending them.
+
+### mcp_server.go
+
+Responsibilities:
+
+- Define OmninodeServer.
+- Define OmninodeGateway.
+- Define MCP tool input structures.
+- Define MCP tool output structures.
+- Define typed tool handlers.
+- Register MCP tools.
+- Define StartMCPStdio.
+
+Current tool handlers:
+
+- handleRestartNode
+- handleRunSandboxCode
+- handleBrowseWebpage
+
+Do not redeclare Gateway, ExecuteResult, BrowseResult, or HTTPGateway here.
+
+## Current MCP Tools
+
+### restart_node
+
+Purpose:
+
+- Request a node restart through the gateway.
+
+Input:
+
+- node_id
+
+Expected behavior:
+
+- Validate the node identifier.
+- Call the gateway restart operation.
+- Return a typed result.
+- Propagate gateway errors.
+
+### run_sandbox_code
+
+Purpose:
+
+- Execute code on a selected Omninode sandbox.
+
+Expected input fields include:
+
+- language
+- code
+
+Supported languages must be confirmed from the current implementation and
+gateway contract. Do not assume a language is supported merely because it
+appears in documentation.
+
+Expected output fields include:
+
+- stdout
+- stderr
+- exit_code
+- node_id
+
+The handler must pass the request context to the gateway.
+
+### browse_webpage
+
+Purpose:
+
+- Request web page browsing or retrieval through the gateway.
+
+Expected input and output structures are defined in the current source.
+Read those definitions before changing the tool.
+
+The implementation should preserve:
+
+- URL validation;
+- request context propagation;
+- gateway error propagation;
+- typed output;
+- safe limits on response size and execution time.
+
+## MCP SDK Pattern
+
+The project uses the official Go MCP SDK.
+
+Before relying on a method or type, inspect the version in go.mod and confirm
+the API against the installed module.
+
+### Server Construction
+
+The intended pattern is:
+
+    server := mcp.NewServer(
+        &mcp.Implementation{
+            Name:    "omninode-client",
+            Version: "v1.0.0",
         },
-    }, nil
-}
-```
+        nil,
+    )
 
-**Key points:**
-- Signature: `func(context.Context, *mcp.CallToolRequest) (*mcp.CallToolResult, error)`
-- Arguments: `req.Params.Arguments` is `json.RawMessage`
-- Return: `*mcp.CallToolResult` with `Content` slice
+Use the exact constructor signature provided by the installed SDK version.
 
-### 5.4 Starting Server
+### Typed Tool Structures
 
-```go
-func (s *OmninodeServer) StartMCPStdio() error {
-    ctx := context.Background()
-    _, err := s.mcpServer.Connect(ctx, &mcp.StdioTransport{}, nil)
-    return err
-}
-```
+Use Go structures for tool input and output.
 
-**Key points:**
-- Use `Connect(ctx, transport, nil)` (3 parameters)
-- Transport: `&mcp.StdioTransport{}` for stdio
+Example:
 
-### 5.5 Complete Example (mcp_server.go)
-
-```go
-package main
-
-import (
-    "context"
-    "encoding/json"
-    "fmt"
-    "sync"
-    "github.com/modelcontextprotocol/go-sdk/mcp"
-)
-
-type OmninodeServer struct {
-    mcpServer   *mcp.Server
-    gateway     *GatewayClient
-    nodeStatus  map[string]NodeStatus
-    statusMutex sync.RWMutex
-}
-
-func NewOmninodeServer() *OmninodeServer {
-    s := &OmninodeServer{
-        gateway:    NewGatewayClientFromEnv(),
-        nodeStatus: make(map[string]NodeStatus),
+    type ExampleInput struct {
+        Value string `json:"value" jsonschema:"required,description=Input value"`
     }
-    
-    s.mcpServer = mcp.NewServer(&mcp.Implementation{
-        Name:    "omninode",
-        Version: "0.1.0",
-    }, nil)
-    
-    s.registerTools()
-    return s
-}
 
-func (s *OmninodeServer) registerTools() {
-    mcp.AddTool(s.mcpServer, &mcp.Tool{
-        Name:        "list_nodes",
-        Description: "List all connected nodes",
-        InputSchema: json.RawMessage(`{"type":"object"}`),
-    }, s.handleListNodes)
-    
-    // Add more tools...
-}
+Do not manually create JSON schema maps unless the installed SDK requires it
+for a specific API that cannot use reflection.
 
-func (s *OmninodeServer) handleListNodes(
-    ctx context.Context,
-    req *mcp.CallToolRequest,
-) (*mcp.CallToolResult, error) {
-    nodes, err := s.gateway.ListNodes()
-    if err != nil {
-        return nil, err
-    }
-    return toolResult(nodes)
-}
+Use json tags for wire format and jsonschema tags for schema generation.
 
-func toolResult(value any) (*mcp.CallToolResult, error) {
-    data, err := json.MarshalIndent(value, "", "  ")
-    if err != nil {
-        return nil, err
-    }
-    return &mcp.CallToolResult{
-        Content: []mcp.Content{
-            &mcp.TextContent{Text: string(data)},
+### Typed Handler Shape
+
+The intended pattern is:
+
+    func (
+        s *OmninodeServer,
+    ) handleExample(
+        ctx context.Context,
+        req *mcp.CallToolRequest,
+        input ExampleInput,
+    ) (*mcp.CallToolResult, ExampleOutput, error)
+
+Use the exact handler shape supported by the installed MCP SDK. If compilation
+shows a different generic signature, inspect the SDK source and update this
+document rather than guessing.
+
+### Tool Registration
+
+The intended pattern is:
+
+    mcp.AddTool(
+        s.mcpServer,
+        &mcp.Tool{
+            Name:        "example",
+            Description: "Example tool",
         },
-    }, nil
-}
+        s.handleExample,
+    )
 
-func (s *OmninodeServer) StartMCPStdio() error {
-    ctx := context.Background()
-    _, err := s.mcpServer.Connect(ctx, &mcp.StdioTransport{}, nil)
-    return err
-}
-```
+Do not register the same tool more than once.
 
----
+## StartMCPStdio Status
 
-## 6. TROUBLESHOOTING
+Important: StartMCPStdio is not currently considered complete.
 
-### Checksum Mismatch
+The current implementation contains a blocking select statement or another
+temporary blocker. This keeps the process alive but does not prove that MCP
+messages can be received or answered.
 
-**Error:**
-```
-verifying github.com/modelcontextprotocol/go-sdk@v1.0.0: checksum mismatch
-downloaded: h1:Z4MSjLi38bTgLrd/LjSmofqRqyBiVKRyQSJgw8q8V74=
-go.sum:     h1:PESNYOmyM1c369tRkzXLY5hHrazj8x9CY1Xu0fLCryM=
-```
+The next implementation task is:
 
-**Fix:**
-```bash
-rm go.sum
-go mod tidy
-go mod verify
-git add go.sum
-git commit -m "Fix go.sum checksums"
-git push
-```
+1. Inspect the installed SDK transport API.
+2. Identify the correct stdio transport type.
+3. Connect the server to stdin and stdout.
+4. Preserve process cancellation through context.
+5. Return transport errors.
+6. Test initialize, tools/list, and tools/call requests.
 
-### Build Errors - Unknown Field
+Do not replace the blocker with guessed code.
 
-**Error:**
-```
-unknown field Name in struct literal of type mcp.ServerOptions
-```
+## Gateway Status
 
-**Cause:** Using old API (v0.2.0 or earlier)
+The gateway layer is currently mocked or incomplete.
 
-**Fix:**
-```bash
-go get github.com/modelcontextprotocol/go-sdk@main
-go mod tidy
-go build ./...
-```
+Before implementing real network access:
 
-### Build Errors - Undefined Type
+1. Identify the current Gateway interface.
+2. List every method required by main.go and mcp_server.go.
+3. Define request and response formats.
+4. Define authentication.
+5. Define timeouts.
+6. Define retry behavior.
+7. Define error handling.
+8. Add a local mock server for tests.
+9. Implement HTTPGateway only after the contract is clear.
 
-**Error:**
-```
-undefined: mcp.CallToolRequest
-```
+Never add a method such as Execute, Browse, RestartNode, or FabricHealth to a
+concrete type without checking the interface and all callers.
 
-**Cause:** Old SDK version
+## Validation Workflow
 
-**Fix:**
-```bash
-go get github.com/modelcontextprotocol/go-sdk@main
-go mod tidy
-```
+From omniclient:
 
-### CI Fails on go mod verify
+    go version
+    go mod tidy
+    go build ./...
+    go test ./...
 
-**Local test:**
-```bash
-go clean -modcache
-go mod download
-go mod verify
-```
+For source inspection:
 
-If local passes but CI fails:
-```bash
-git add go.mod go.sum
-git commit -m "Update go.sum with verified checksums"
-git push
-```
+    go doc github.com/modelcontextprotocol/go-sdk/mcp
+    go list -m all
+    go list -m -json github.com/modelcontextprotocol/go-sdk
 
-### Common Compilation Errors Table
+After every code change:
 
-| Error | Cause | Fix |
-|-------|-------|-----|
-| `unknown field Name in mcp.ServerOptions` | Old API | Use `&mcp.Implementation{Name: ...}` |
-| `cannot use map[string]any as *jsonschema.Schema` | Wrong InputSchema | Use `json.RawMessage(...)` |
-| `undefined: mcp.CallToolRequest` | Old SDK | Upgrade to v1.8.1+ |
-| `too many arguments in call to Connect` | Wrong signature | `Connect(ctx, transport, nil)` |
+1. Format changed Go files with gofmt.
+2. Run go build ./....
+3. Run go test ./....
+4. Inspect git diff.
+5. Confirm no duplicate structs were introduced.
+6. Confirm documentation remains ASCII-only.
 
----
+## Safe Implementation Order
 
-## 7. TESTING
+The recommended implementation sequence is:
 
-### Test with MCP Inspector
+### Phase 1: Stabilize
 
-```bash
-# Install MCP Inspector
-npm install -g @modelcontextprotocol/inspector
+- Confirm main.go builds.
+- Confirm gateway_client.go definitions.
+- Confirm mcp_server.go definitions.
+- Remove duplicate structures only when their ownership is clear.
+- Add compile-time interface checks where useful.
 
-# Run your server
-go run .
+### Phase 2: MCP Transport
 
-# In another terminal
-mcp-inspector
-# Connect to stdio: go run .
-```
+- Replace the StartMCPStdio blocker.
+- Test MCP initialize.
+- Test tools/list.
+- Test tools/call for each existing tool.
 
-### Test with Python Script
+### Phase 3: Gateway Contract
 
-```python
-import subprocess
-import json
+- Document gateway endpoints or RPC methods.
+- Implement HTTPGateway.
+- Add timeouts and context cancellation.
+- Add authentication handling.
+- Add mock gateway tests.
 
-proc = subprocess.Popen(
-    ["go", "run", "."],
-    stdin=subprocess.PIPE,
-    stdout=subprocess.PIPE,
-    text=True
-)
+### Phase 4: Operational Tools
 
-request = {
-    "jsonrpc": "2.0",
-    "id": 1,
-    "method": "tools/call",
-    "params": {
-        "name": "list_nodes",
-        "arguments": {}
-    }
-}
+Only after the transport and gateway are stable, add new tools such as:
 
-proc.stdin.write(json.dumps(request) + "\n")
-proc.stdin.flush()
-response = proc.stdout.readline()
-print(response)
-```
+- node discovery;
+- node health;
+- task dispatch;
+- sandbox execution;
+- web browsing;
+- file operations.
 
-### Unit Tests
+Every new tool must have:
 
-```bash
-go test ./... -v
-```
+- an input structure;
+- an output structure;
+- json and jsonschema tags;
+- one handler;
+- one registration;
+- validation;
+- error handling;
+- tests.
 
----
+## Common Mistakes to Avoid
 
-## 8. DEVELOPMENT WORKFLOW
+### Duplicate declarations
 
-### 1. Make Changes
+Bad:
 
-```bash
-vim mcp_server.go
-# or your preferred editor
-```
+    type ExecuteResult struct { ... }
 
-### 2. Build and Test Locally
+when ExecuteResult already exists in gateway_client.go.
 
-```bash
-go build ./...
-go run .  # Verify it starts without panic
-```
+Correct:
 
-### 3. Commit and Push
+- Reuse the existing type.
+- Modify the owner file only if the structure itself must change.
 
-```bash
-git add .
-git commit -m "Clear description of changes"
-git push origin main
-```
+### Wrong gateway receiver
 
-### 4. Verify CI
+Bad:
 
-Go to: https://github.com/ZooL-OhKi/omninode/actions
+    s.gateway.Execute(...)
 
-Wait for all checks to turn green.
+when Execute is not part of the current Gateway interface.
 
----
+Correct:
 
-## CURRENT STATE
+- Inspect the interface.
+- Add the method to the interface and implementation only as an intentional
+  architecture change.
+- Update all implementations and tests.
 
-**Last Commit:** c96c977 - "Fix MCP SDK compatibility - upgrade to latest version"
-**CI Status:** PASSING
-**Build Status:** STABLE
-**MCP SDK Version:** v1.8.1-0.20260921161013-07e46a2864f7
+### Fake MCP success
 
----
+Bad:
 
-## RESOURCES
+    select {}
 
-- MCP SDK Go: https://github.com/modelcontextprotocol/go-sdk
-- MCP Spec: https://modelcontextprotocol.io
-- Examples: https://github.com/modelcontextprotocol/go-sdk/tree/main/mcp
-- Wails: https://wails.io
+This only blocks. It does not implement MCP transport.
 
----
+Correct:
 
-END OF HANDOFF
+- Connect the MCP server to the SDK stdio transport.
+- Test actual JSON-RPC requests.
+
+### Unverified assumptions
+
+Do not assume:
+
+- that a route exists;
+- that an endpoint is HTTP rather than RPC;
+- that a tool is available;
+- that a language is supported;
+- that a method exists on Gateway;
+- that a build passing means MCP runtime works.
+
+## Required AI Handoff Response
+
+After reading this file, report exactly:
+
+    Handoff read.
+    Go version: <version>
+    MCP SDK version: <version>
+    Build status: <pass or fail>
+    Test status: <pass or fail>
+    StartMCPStdio status: <real transport or temporary blocker>
+    Gateway status: <mock, partial, or real>
+    Core file to modify next: <file>
+    Proposed next task: <task>

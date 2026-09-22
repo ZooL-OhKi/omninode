@@ -1,62 +1,92 @@
-# Omninode project index
+# Omninode Repository Index
 
-## Purpose
+This file is the navigation map for humans and new AI contributors.
 
-Omninode hosts autonomous AI residents on always-on Oracle servers. The resident AI is the operator of its environment: it can plan and execute work using node resources, files, code, processes, browser sessions, and local tools within explicit runtime capabilities and security policies.
+## Start here
 
-## Read first
+Read files in this order:
 
-1. `README.md` — mission and quick orientation.
-2. `PROJECT_HANDOVER.md` — current state and continuation procedure.
-3. `ARCHITECTURE.md` — components and data flow.
-4. `SECURITY.md` — capabilities, isolation, secrets, browser and high-risk actions.
-5. `ROADMAP.md` — ordered engineering work.
+1. `README.md` — project mission, current status, and immediate operational objective.
+2. `PROJECT_HANDOVER.md` — exact continuation point, verified commands, unresolved work, and recovery instructions.
+3. `ARCHITECTURE.md` — component boundaries, MQTT flow, lifecycle, and invariants.
+4. `SECURITY.md` — non-negotiable security rules.
+5. `ROADMAP.md` — ordered implementation plan.
 
-## Components
+## Python gateway
 
-- `omniclient/`: Go HTTP gateway client and MCP server integration.
-- `node1-gateway/`: FastAPI HTTP gateway and MQTT task dispatcher.
-- MQTT broker: request/reply transport.
-- Oracle nodes: resident AI workers.
-- Browser runtime: planned controlled web capability.
+Directory: `node1-gateway/`
 
-## Current flow
+Important files:
 
-1. A client calls the authenticated gateway.
-2. The gateway validates the request and selects an online node.
-3. The gateway publishes a task over MQTT with correlation data.
-4. A worker executes the task and publishes a result.
-5. The gateway resolves the pending task, cleans it up, and returns the result.
+- `main.py`: FastAPI application and HTTP-facing behavior.
+- `mqtt_service.py`: broker connection, publish/subscribe, and request/reply coordination.
+- `audit.py`: audit records and sinks.
+- `policy_engine.py`: capability and authorization decisions.
+- `command_executor.py`: bounded allowlisted process execution.
+- `workspace_manager.py`: path confinement, snapshots, diffs, and workspace operations.
+- `local_executor.py`: constrained local workspace write implementation.
+- `mqtt_task_protocol.py`: task identity and deadline validation.
+- `work_loop.py`: autonomous goal orchestration.
+- `browser_runtime.py`: browser policy/runtime scaffolding.
 
-## Current baseline
+Python tests include gateway tests, MQTT tests, executor tests, workspace/work-loop tests, and browser policy tests.
 
-- Synchronous MQTT Request-Reply exists in `mqtt_service.py`.
-- `POST /api/v1/browse` exists in `main.py`.
-- The gateway uses `x-omninode-key` and `OMNINODE_API_KEY`.
-- The Go Browse client is covered by a local `httptest.NewServer` test.
-- Go formatting, tests, and vet must remain clean.
-- Python compile/import are verified; Python test discovery currently reports `no tests ran` unless tests are added.
+## Go client
 
-## Before changing code
+Directory: `omniclient/`
 
-```powershell
-Set-Location A:\omninode
-Get-Content .\README.md
-Get-Content .\PROJECT_HANDOVER.md
-Get-Content .\ARCHITECTURE.md
-Get-Content .\SECURITY.md
-Get-Content .\ROADMAP.md
-git status --short
-git diff --stat
+Important files:
+
+- `main.go`: client entry point and runtime wiring.
+- `gateway_client.go`: gateway HTTP/MQTT client behavior.
+- `mcp_server_test.go`: MCP-related test coverage.
+- `go.mod` and `go.sum`: dependency declarations.
+
+Before extending Go behavior, inspect existing interfaces rather than creating a second MQTT client or a second request/reply implementation.
+
+## Configuration and runtime
+
+Configuration must come from environment variables or local untracked configuration. Never commit credentials, private keys, `.env` files, virtual environments, caches, or compiled binaries.
+
+The first runtime should use:
+
+```text
+broker: loopback only
+node ID: explicit and stable
+workspace: temporary registered directory
+capability: workspace.write
+transport: QoS 1, non-retained tasks
 ```
 
-Do not discard local changes. Do not commit or push without explicit approval.
+## Current continuation point
 
-## Immediate next work
+The last published implementation commit is `325eee3` on `feature/browse-rpc-mqtt`. The next engineering task is to make the real MQTT task path executable end-to-end with one local node.
 
-- Add broker-backed MQTT integration tests.
-- Version the RPC request/response schema.
-- Test late replies, duplicate replies, timeout cleanup, reconnects, and concurrent tasks.
-- Define capability and policy objects.
-- Design the browser runtime using standard Chromium, Playwright/CDP, isolated profiles, and protected CDP.
-- Add controlled filesystem and sandbox services before exposing arbitrary execution.
+## Search strategy for a new contributor
+
+Search these symbols first:
+
+- `dispatch_task`
+- `publish`
+- `subscribe`
+- `correlation`
+- `task_id`
+- `goal_id`
+- `workspace.write`
+- `validate_task`
+- `authorize`
+- `execute`
+- `heartbeat`
+
+Trace the call graph before editing. Preserve existing topic names and DTOs unless a migration is explicitly documented.
+
+## Exclusions
+
+Do not include or inspect as source:
+
+- `venv/`;
+- `__pycache__/`;
+- `.pytest_cache/`;
+- generated binaries;
+- secrets and credentials;
+- temporary scripts such as `update_omninode_loop.ps1` unless deliberately promoted to a maintained tool.

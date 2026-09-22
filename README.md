@@ -1,59 +1,119 @@
 # Omninode
 
-Omninode is a personal infrastructure for autonomous AI residents running continuously on Oracle servers. It is not merely a collection of agents waiting for small commands from another AI: each resident AI is intended to plan, execute, verify, correct, and document work directly on the node that hosts it.
+Omninode is a distributed AI execution fabric. It connects external AI systems, MCP clients, a FastAPI gateway, MQTT-connected nodes, and local capability-bound executors.
 
-## Mission
+The project is designed around a simple principle: an AI should be able to request useful work across trusted devices, but no remote model should receive unrestricted control of a host. Every operation must pass through explicit identity, capability, workspace, policy, deadline, and audit checks.
 
-An Omninode resident can use the host node's CPU, memory, disk, network, browser, files, code, and local tools according to explicit capabilities and policies. The objective is to replace repetitive operational work while retaining infrastructure-level controls for identity, permissions, resource limits, auditing, and high-risk actions.
+## Project philosophy
 
-Autonomy does not mean unrestricted privilege. The runtime must enforce default-deny policies, least privilege, isolated workspaces, secret isolation, network controls, resource limits, and auditability.
+Omninode is not a remote shell and not a collection of obedient agents. It is a controlled fabric in which autonomous workers retain local authority boundaries while cooperating through a common protocol.
 
-## Current architecture
+The design priorities are:
 
-- `omniclient`: Go client and MCP-facing server.
-- `node1-gateway`: FastAPI gateway translating authenticated HTTP calls into MQTT tasks.
-- MQTT broker: transport between gateway and resident workers.
-- Oracle nodes: persistent AI workers and their local resources.
-- Browser runtime: planned capability based initially on standard Chromium with Playwright and/or CDP, isolated per agent or task.
+1. Local autonomy: a node decides locally whether an operation is permitted.
+2. Least privilege: capabilities are narrow, explicit, temporary, and auditable.
+3. Transport independence: MQTT carries messages; policy remains in the node executor.
+4. Observable execution: every task has an identity, lifecycle, result, and audit trail.
+5. Safe failure: invalid, expired, duplicated, or unauthorized work is rejected deterministically.
+6. Incremental delivery: first make one real end-to-end path work, then add persistence, cloud deployment, and richer tools.
 
-The current implemented path includes synchronous Request-Reply over MQTT and `POST /api/v1/browse`. The gateway selects an online node with the lowest reported load and maps publish, timeout, and upstream failures to HTTP errors.
+## Current branch and status
 
-## Browser direction
+Active branch: `feature/browse-rpc-mqtt`
 
-The first implementation should use standard Chromium, isolated profiles, and Playwright/CDP rather than a custom Chromium fork. CDP must be protected on localhost or an authenticated private network. Domain allowlists, session isolation, download/upload controls, and audit logging are required.
+Current published commit at the time of this handover: `325eee3`
 
-CAPTCHA, MFA, payment, account creation, and other high-risk flows must be paused, delegated, or explicitly approved when required. Omninode must not bypass anti-abuse protections.
+Validated locally before the documentation update:
 
-## Verification
+- Python gateway tests: 15 passed, 1 warning.
+- Python bytecode compilation: passed.
+- Go tests: passed.
+- `go vet ./...`: passed.
+- `git diff --check`: passed.
+- No commit or push should be forced over remote history.
 
-Go:
+The repository is not yet production-ready. The most important unfinished work is the real MQTT end-to-end path from an MCP dispatch to a local `omniclient` executor and back.
 
-```powershell
-Set-Location A:\omninode\omniclient
-gofmt -l .
-go test ./...
-go vet ./...
+## Architecture at a glance
+
+```text
+External AI / MCP host
+        |
+        v
+omniclient MCP server
+        |
+        v
+Gateway client / FastAPI gateway
+        |
+        v
+MQTT broker
+        |
+        v
+Local omniclient node
+        |
+        v
+Capability-bound executor
+        |
+        v
+Authorized workspace or local resource
 ```
 
-Python:
+MQTT is a transport and coordination layer. It is not the authorization boundary. The local node must validate the complete task before touching the filesystem, starting a process, or controlling a browser.
 
-```powershell
-Set-Location A:\omninode\node1-gateway
-& .\venv\Scripts\python.exe -m compileall .
-& .\venv\Scripts\python.exe -m pytest -q
-& .\venv\Scripts\python.exe -c "import main; print('main import OK')"
+## Implemented building blocks
+
+The current branch contains or modifies:
+
+- FastAPI gateway endpoints and gateway-side MQTT integration.
+- Thread-safe MQTT request/reply support.
+- Go `omniclient` gateway client and MCP-related code.
+- Audit, policy, command-execution, workspace, and autonomous work-loop modules.
+- Browser runtime policy scaffolding with human-handoff requirements for friction events.
+- A local workspace executor supporting constrained atomic writes.
+- Task validation for node identity, UUIDs, capability, task type, and deadlines.
+
+## Immediate operational goal
+
+Make this path work with a local broker and a temporary workspace:
+
+```text
+MCP dispatch_task
+  -> gateway accepts task
+  -> gateway publishes MQTT task
+  -> local node receives task
+  -> local node validates capability and workspace
+  -> executor creates one authorized file
+  -> local node publishes correlated response
+  -> gateway/MCP returns the real result
 ```
 
-At the current baseline, Python compilation and import are verified, but no Python tests are currently detected if pytest reports `no tests ran`.
+The first real capability should remain `workspace.write`. Do not begin with arbitrary shell commands, Desktop-wide access, browser automation, or public cloud exposure.
 
-## Roadmap
+## Local synchronization
 
-1. Version the RPC contract and error codes.
-2. Add broker-backed MQTT end-to-end tests for concurrency, timeout, duplication, late replies, and reconnects.
-3. Add capability and policy enforcement with audit events.
-4. Build the browser runtime around isolated Chromium profiles and protected CDP.
-5. Add controlled filesystem tools and a resource-limited sandbox.
-6. Implement `run_sandbox_code` only after isolation and policy tests pass.
-7. Add further MCP tools gradually, including node health, workspace operations, and approved system actions.
+After documentation or code is published remotely:
 
-See `INDEX.md`, `ARCHITECTURE.md`, `ROADMAP.md`, `SECURITY.md`, and `PROJECT_HANDOVER.md` for operational details.
+```powershell
+Set-Location A:\omninode
+git fetch origin
+git pull --ff-only origin feature/browse-rpc-mqtt
+git status --short
+```
+
+Do not use `git reset --hard` or `git push --force` unless an explicit recovery decision has been made and the affected commits are backed up.
+
+## Recommended next actions
+
+1. Pull this branch locally.
+2. Inspect the actual MQTT interfaces in `node1-gateway/mqtt_service.py` and `omniclient/gateway_client.go`.
+3. Implement the real local-node subscriber and dispatcher without changing the security model.
+4. Use a broker on loopback only for the first operational run.
+5. Send one `workspace.write` task to a temporary workspace.
+6. Add persistence and retry only after the end-to-end result is real and observable.
+7. Configure TLS and topic ACLs before connecting nodes over a network.
+
+## Non-goals
+
+Omninode must not implement anti-bot evasion, fingerprint spoofing, CAPTCHA bypass, unrestricted remote shell, credential harvesting, silent account creation, or uncontrolled access to personal profiles.
+
+For the complete recovery context, read `PROJECT_HANDOVER.md`. For the task sequence, read `ROADMAP.md`. For security rules, read `SECURITY.md`. For file ownership and navigation, read `INDEX.md`.

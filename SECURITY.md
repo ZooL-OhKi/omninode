@@ -1,42 +1,150 @@
-# Omninode security model
+# Omninode Security Model
 
-## Core principles
+## Security position
 
-- Default deny.
-- Least privilege.
-- Explicit capability grants.
-- Isolated workspaces.
-- No implicit secret inheritance.
-- Network egress denied by default for sandboxed execution.
-- Every consequential action auditable.
-- High-risk and destructive actions require an approval policy or explicit human confirmation.
+Omninode treats every remote request as untrusted input. Authentication identifies a caller; it does not grant permission to perform arbitrary work. Authorization is capability-based and must be re-evaluated at the node that owns the resource.
 
-## Agent capabilities
+## Trust zones
 
-Capabilities should be assigned to an agent, node, task, and tool scope. A capability should specify the permitted operation, resource, path/domain, duration, and budget. Capabilities should expire and should not silently expand because a task failed.
+```text
+Untrusted AI / MCP input
+        |
+        v
+Gateway validation and routing
+        |
+        v
+MQTT transport
+        |
+        v
+Local node policy boundary
+        |
+        v
+Registered workspace or explicitly approved resource
+```
 
-## Filesystem
+The local node is the final authority. The gateway, broker, and remote AI cannot bypass local policy.
 
-File operations must be restricted to configured workspaces. Deny path traversal, host root access, secret stores, device files, Docker sockets, SSH keys, and unrelated service data. Log reads and writes when they affect protected or shared workspaces. Prefer snapshots, patches, and rollback for important changes.
+## Capability rules
 
-## Processes and sandbox
+Capabilities must be:
 
-Do not expose unrestricted shell execution. Future sandbox execution must use an isolated runtime with CPU, memory, process, filesystem, output, and time limits. Network access is denied unless a narrowly scoped allowlist grants it. Secrets and host credentials must not be inherited.
+- explicit;
+- narrow;
+- bound to agent, goal, node, and resource;
+- time-limited;
+- budget-limited;
+- revocable;
+- auditable;
+- default-deny.
 
-## Browser
+The first capability is `workspace.write`. It must not imply shell execution, reading arbitrary files, credential access, browser control, or access to the real Desktop.
 
-Use isolated Chromium profiles per agent or task. Protect Playwright/CDP endpoints on localhost or an authenticated private network. Apply domain allowlists and control downloads, uploads, cookies, storage, and credentials. Keep browser actions auditable.
+## Workspace rules
 
-CAPTCHA and MFA should cause a pause, a human handoff, or an authorized service flow. Omninode must not bypass anti-abuse protections. Account creation and automated web actions must comply with the target service's rules, applicable law, and rate limits.
+Every filesystem operation must use a registered workspace ID. Paths must be relative to that workspace. Resolve the path and verify containment after resolution. Reject:
 
-## Network and secrets
+- absolute paths;
+- `..` traversal;
+- symlink escapes;
+- `.ssh`, `.env`, secrets, key, token, and credential paths;
+- oversized files;
+- excessive file counts;
+- paths outside the registered root.
 
-Use authenticated MQTT connections and TLS where available. Keep API keys, broker credentials, cookies, and cloud credentials outside source control. Inject secrets only into the smallest process scope that needs them. Rotate credentials and record access events without logging secret values.
+Use atomic temporary-file replacement for writes. Record the workspace, relative path, actor, goal, task, decision, and result without logging file secrets or content unnecessarily.
 
-## Audit and response
+## Command execution
 
-Record agent ID, task ID, tool, node, timestamps, policy decision, resource, result, and error code. Provide liveness and readiness signals separately. Use circuit breakers and rate limits to prevent runaway loops. Preserve enough evidence to reconstruct autonomous actions without storing sensitive content unnecessarily.
+The default is no arbitrary command execution. If a future capability permits a process, it must use an explicit argv allowlist, `shell=false`, bounded environment, confined working directory, timeout, output budget, and audit record. Never accept a shell command string from an AI as an executable instruction.
 
-## Security testing
+## MQTT security
 
-Test malformed inputs, path traversal, unauthorized headers, duplicate and late MQTT replies, broker reconnects, browser session isolation, output limits, sandbox escape attempts, secret leakage, and policy bypasses before enabling higher-risk capabilities.
+Local development may use a loopback broker without TLS only while the broker is inaccessible from the network. Any network deployment must use:
+
+- TLS;
+- per-client authentication or mTLS;
+- topic ACLs;
+- unique client IDs;
+- non-retained executable task messages;
+- QoS selected together with application idempotency;
+- credential rotation;
+- broker monitoring.
+
+Recommended authorization:
+
+```text
+gateway:
+  write omninode/v1/nodes/+/tasks
+  read  omninode/v1/nodes/+/responses
+
+node-local:
+  read  omninode/v1/nodes/node-local/tasks
+  write omninode/v1/nodes/node-local/responses
+  write omninode/v1/nodes/node-local/heartbeat
+```
+
+Never use anonymous public access or a shared administrator account for production.
+
+## Browser security
+
+Browser sessions must be isolated and ephemeral by default. Use explicit domain allowlists, bounded file transfers, capability checks, and human handoff for CAPTCHA, MFA, payment, credentials, account creation, or anti-bot challenges.
+
+Forbidden behavior includes fingerprint spoofing, WebDriver masking, Canvas/WebGL/Audio spoofing, synthetic biometric movement, proxy rotation for evasion, CAPTCHA bypass, and use of personal browser profiles.
+
+## Secrets
+
+Never commit:
+
+- API keys;
+- passwords;
+- MQTT credentials;
+- private keys;
+- certificates with private material;
+- cookies;
+- personal browser profiles;
+- `.env` files;
+- local virtual environments.
+
+Use environment variables or an external secret store and rotate any secret that appears in a terminal transcript or source file.
+
+## Audit requirements
+
+Audit records should include:
+
+- audit ID;
+- UTC timestamp;
+- agent ID;
+- goal ID;
+- task ID;
+- node ID;
+- action;
+- resource;
+- policy version;
+- allow/deny decision;
+- reason;
+- bounded result metadata.
+
+Do not store secrets or unnecessary payload content in audit logs.
+
+## Incident response
+
+If a credential or private key is exposed:
+
+1. revoke or rotate it immediately;
+2. inspect broker and gateway logs;
+3. invalidate affected capabilities;
+4. preserve the relevant audit records;
+5. remove the secret from future commits;
+6. review the scope of any task executed with that credential.
+
+## Security acceptance criteria
+
+A milestone is not secure merely because unit tests pass. The operational acceptance test must demonstrate that:
+
+- a valid task succeeds;
+- an invalid capability is blocked;
+- an expired task is not executed;
+- traversal and symlink escapes are blocked;
+- duplicate delivery does not create uncontrolled side effects;
+- the broker cannot be used to reach another node’s task topic;
+- the actual result is returned to the requesting agent.

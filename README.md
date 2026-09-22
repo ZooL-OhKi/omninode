@@ -1,106 +1,71 @@
 # Omninode
 
-**Fabric di calcolo agentico distribuito, zero-cost, controllato via MCP (Model Context Protocol)**
+Distributed computational node system with MCP (Model Context Protocol) interface.
 
-## Architettura
+---
+
+## START HERE
+
+**For AI and developers:** See `INDEX.md` in the root directory.
+
+That file contains:
+- Quick start guide
+- Documentation index
+- MCP SDK patterns
+- Troubleshooting
+
+---
+
+## Project Structure
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│                     EXTERNAL AI AGENTS                          │
-│              (Claude, GPT, Llama, etc. via MCP)                 │
-└─────────────────────────────────────────────────────────────────┘
-                              │
-                              │ MCP Protocol
-                              ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                    OMNICLIENT (Desktop App)                     │
-│              Go + Wails | Windows/macOS/Linux                   │
-│  - MCP Server per agenti esterni                               │
-│  - Orchestratore locale dei nodi                               │
-│  - Zero-touch updates via GitHub Actions                       │
-└─────────────────────────────────────────────────────────────────┘
-                              │
-                              │ MQTT / HTTP
-                              ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                    NODE1-GATEWAY (Cloud)                        │
-│              Python + FastAPI + Uvicorn                         │
-│  - Validazione header X-Omninode-Key                            │
-│  - Routing messaggi MQTT                                        │
-│  - API REST per gestione nodi                                   │
-└─────────────────────────────────────────────────────────────────┘
-                              │
-                              │ MQTT
-                              ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                    DISTRIBUTED NODES                            │
-│         (Node2, Node3, ... | Edge/Cloud/IoT)                    │
-│  - Esecuzione task computazionali                               │
-│  - Reporting stato e risultati                                  │
-└─────────────────────────────────────────────────────────────────┘
+omninode/
+├── INDEX.md              ← START HERE
+├── README.md             ← This file
+├── omniclient/           ← MCP client implementation
+│   ├── HANDOFF.md        ← Complete guide (9.6KB)
+│   ├── main.go
+│   ├── mcp_server.go
+│   ├── gateway_client.go
+│   ├── go.mod
+│   └── go.sum
+└── .github/workflows/    ← CI/CD pipelines
 ```
 
-## Componenti
+---
 
-### OmniClient
-Applicazione desktop che funge da hub centrale:
-- **Tecnologia**: Go + Wails (frontend web-based)
-- **Ruolo**: MCP Server per agenti IA esterni
-- **Deploy**: Build multi-piattaforma (Windows, macOS, Linux)
+## Quick Commands
 
-### Node1-Gateway
-Gateway cloud per la comunicazione distribuita:
-- **Tecnologia**: Python + FastAPI + Uvicorn
-- **Ruolo**: Validazione, routing MQTT, API REST
-- **Deploy**: Container Docker o VM cloud
-
-## Quick Start
-
-### Prerequisiti
-- Go 1.21+
-- Python 3.11+
-- Node.js 18+
-- Wails CLI: `go install github.com/wailsapp/wails/v2/cmd/wails@latest`
-
-### Sviluppo Locale
-
-**OmniClient:**
 ```bash
+# Setup
 cd omniclient
-wails dev
+go mod download
+go mod verify
+go build ./...
+
+# Run
+export OMNINODE_GATEWAY_URL="https://..."
+export OMNINODE_API_KEY="..."
+go run .
 ```
 
-**Node1-Gateway:**
-```bash
-cd node1-gateway
-python -m venv venv
-source venv/bin/activate  # Windows: venv\Scripts\activate
-pip install -r requirements.txt
-uvicorn main:app --reload
-```
+---
 
-### Build
+## Status
 
-**OmniClient (multi-piattaforma):**
-```bash
-cd omniclient
-wails build -platform windows darwin linux
-```
+- **CI:** PASSING
+- **Build:** STABLE
+- **MCP SDK:** v1.8.1+
 
-**Node1-Gateway:**
-```bash
-cd node1-gateway
-python -m build
-```
+---
 
-## CI/CD
+## Links
 
-La pipeline GitHub Actions (`build.yml`) gestisce:
-- Build automatico su push a `main`
-- Test e lint per Python e Go
-- Build multi-piattaforma per OmniClient
-- Release automatica su tag `v*`
+- Documentation: `INDEX.md`
+- Complete Guide: `omniclient/HANDOFF.md`
+- GitHub Actions: https://github.com/ZooL-OhKi/omninode/actions
+- MCP SDK: https://github.com/modelcontextprotocol/go-sdk
 
-## License
+---
 
-MIT
+MIT License

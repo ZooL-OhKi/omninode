@@ -1,14 +1,50 @@
-# General
-.DS_Store
-.env
-secret.key
-
-# Python (Node 1)
+# Python
 __pycache__/
 *.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
 node1-gateway/venv/
 
-# Go / Wails (OmniClient)
-omniclient/build/bin/
-omniclient/frontend/node_modules/
-omniclient/*.exe
+# Go
+*.exe
+*.dll
+*.so
+*.dylib
+omniclient/omniclient
+
+# Environment and secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+secrets/
+
+# Runtime and local state
+*.log
+*.pid
+*.db
+*.sqlite
+*.sqlite3
+*.tmp
+*.swp
+.DS_Store
+Thumbs.db
+
+# Build and test artifacts
+build/
+dist/
+coverage/
+htmlcov/
+.pytest_cache/
+.test-results/
+
+# IDE
+.vscode/
+.idea/
+*.code-workspace

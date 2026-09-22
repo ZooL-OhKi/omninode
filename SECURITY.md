@@ -1,76 +1,55 @@
 # Omninode Security Model
 
-## Security position
+## Core position
 
-Omninode treats every remote request as untrusted input. Authentication identifies a caller; it does not grant permission to perform arbitrary work. Authorization is capability-based and must be re-evaluated at the node that owns the resource.
+All remote task input is untrusted. Authentication identifies a caller; authorization is a separate decision. The local node is the final security boundary.
 
 ## Trust zones
 
 ```text
-Untrusted AI / MCP input
-        |
-        v
-Gateway validation and routing
-        |
-        v
-MQTT transport
-        |
-        v
-Local node policy boundary
-        |
-        v
-Registered workspace or explicitly approved resource
+AI/MCP input -> gateway -> MQTT transport -> local node policy -> authorized resource
 ```
 
-The local node is the final authority. The gateway, broker, and remote AI cannot bypass local policy.
+A broker may deliver a message. It cannot grant permission to execute it.
 
-## Capability rules
+## Capability model
 
-Capabilities must be:
+Capabilities must be explicit, narrow, scoped to agent/goal/node/resource, time-limited, budget-limited, revocable, and auditable. Default is deny.
 
-- explicit;
-- narrow;
-- bound to agent, goal, node, and resource;
-- time-limited;
-- budget-limited;
-- revocable;
-- auditable;
-- default-deny.
+Initial capability: `workspace.write` only.
 
-The first capability is `workspace.write`. It must not imply shell execution, reading arbitrary files, credential access, browser control, or access to the real Desktop.
+It does not imply:
 
-## Workspace rules
+- arbitrary shell execution;
+- arbitrary file reads;
+- credential access;
+- Desktop-wide access;
+- browser control;
+- account creation;
+- network access.
 
-Every filesystem operation must use a registered workspace ID. Paths must be relative to that workspace. Resolve the path and verify containment after resolution. Reject:
+## Workspace confinement
+
+Use registered workspace IDs and relative paths. Resolve paths and verify containment after resolution. Reject:
 
 - absolute paths;
 - `..` traversal;
 - symlink escapes;
-- `.ssh`, `.env`, secrets, key, token, and credential paths;
-- oversized files;
-- excessive file counts;
-- paths outside the registered root.
+- `.ssh`, `.env`, key, token, credential, and secret locations;
+- excessive file size or count;
+- unregistered workspace roots.
 
-Use atomic temporary-file replacement for writes. Record the workspace, relative path, actor, goal, task, decision, and result without logging file secrets or content unnecessarily.
+Use atomic writes. Audit action, identity, resource, decision, policy version, and bounded result metadata without storing unnecessary secrets or file content.
 
 ## Command execution
 
-The default is no arbitrary command execution. If a future capability permits a process, it must use an explicit argv allowlist, `shell=false`, bounded environment, confined working directory, timeout, output budget, and audit record. Never accept a shell command string from an AI as an executable instruction.
+Do not execute arbitrary shell text from an AI. Future process capabilities must use argv allowlists, `shell=false`, minimal environment, confined cwd, timeout, output limits, resource limits, and audit.
 
-## MQTT security
+## MQTT
 
-Local development may use a loopback broker without TLS only while the broker is inaccessible from the network. Any network deployment must use:
+Loopback unauthenticated MQTT is permitted only for local development while inaccessible from the network. Network operation requires TLS/mTLS, per-node identity, ACLs, unique client IDs, non-retained executable tasks, bounded QoS, and credential rotation.
 
-- TLS;
-- per-client authentication or mTLS;
-- topic ACLs;
-- unique client IDs;
-- non-retained executable task messages;
-- QoS selected together with application idempotency;
-- credential rotation;
-- broker monitoring.
-
-Recommended authorization:
+Recommended topic permissions:
 
 ```text
 gateway:
@@ -83,68 +62,31 @@ node-local:
   write omninode/v1/nodes/node-local/heartbeat
 ```
 
-Never use anonymous public access or a shared administrator account for production.
+Never expose an anonymous administrative broker publicly.
 
-## Browser security
+## Browser
 
-Browser sessions must be isolated and ephemeral by default. Use explicit domain allowlists, bounded file transfers, capability checks, and human handoff for CAPTCHA, MFA, payment, credentials, account creation, or anti-bot challenges.
+Use isolated contexts, ephemeral profiles, domain allowlists, bounded transfers, and human handoff for CAPTCHA, MFA, payments, credentials, account creation, and anti-bot friction.
 
-Forbidden behavior includes fingerprint spoofing, WebDriver masking, Canvas/WebGL/Audio spoofing, synthetic biometric movement, proxy rotation for evasion, CAPTCHA bypass, and use of personal browser profiles.
+Forbidden: fingerprint spoofing, WebDriver masking, Canvas/WebGL/Audio spoofing, synthetic biometric motion, proxy rotation for evasion, CAPTCHA bypass, and personal profile reuse.
 
 ## Secrets
 
-Never commit:
+Never commit keys, passwords, MQTT credentials, private certificates, cookies, personal profiles, `.env`, `venv`, caches, or generated binaries. Rotate anything exposed in source or terminal output.
 
-- API keys;
-- passwords;
-- MQTT credentials;
-- private keys;
-- certificates with private material;
-- cookies;
-- personal browser profiles;
-- `.env` files;
-- local virtual environments.
+## Audit
 
-Use environment variables or an external secret store and rotate any secret that appears in a terminal transcript or source file.
+Audit records should include audit ID, UTC timestamp, task ID, goal ID, agent ID, node ID, action, resource, policy version, decision, reason, and bounded result metadata.
 
-## Audit requirements
+## Security acceptance
 
-Audit records should include:
+The local vertical slice is acceptable only when:
 
-- audit ID;
-- UTC timestamp;
-- agent ID;
-- goal ID;
-- task ID;
-- node ID;
-- action;
-- resource;
-- policy version;
-- allow/deny decision;
-- reason;
-- bounded result metadata.
-
-Do not store secrets or unnecessary payload content in audit logs.
-
-## Incident response
-
-If a credential or private key is exposed:
-
-1. revoke or rotate it immediately;
-2. inspect broker and gateway logs;
-3. invalidate affected capabilities;
-4. preserve the relevant audit records;
-5. remove the secret from future commits;
-6. review the scope of any task executed with that credential.
-
-## Security acceptance criteria
-
-A milestone is not secure merely because unit tests pass. The operational acceptance test must demonstrate that:
-
-- a valid task succeeds;
-- an invalid capability is blocked;
-- an expired task is not executed;
+- valid task succeeds;
+- wrong node is blocked;
+- unsupported capability is blocked;
+- expired task is not executed;
 - traversal and symlink escapes are blocked;
-- duplicate delivery does not create uncontrolled side effects;
-- the broker cannot be used to reach another node’s task topic;
-- the actual result is returned to the requesting agent.
+- duplicate delivery is controlled;
+- another node's topic cannot be read or written;
+- actual result is returned to the caller.

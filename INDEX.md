@@ -1,92 +1,72 @@
-# Omninode Repository Index
+# Omninode Index
 
-This file is the navigation map for humans and new AI contributors.
+This is the compact navigation map. For complete onboarding use `docs/AI_ONBOARDING.md`.
 
-## Start here
+## Read first
 
-Read files in this order:
+1. `docs/AI_ONBOARDING.md`
+2. `PROJECT_HANDOVER.md`
+3. `docs/REPOSITORY_MAP.md`
+4. `ARCHITECTURE.md`
+5. `SECURITY.md`
+6. `docs/OPERATIONS_RUNBOOK.md`
+7. `ROADMAP.md`
 
-1. `README.md` — project mission, current status, and immediate operational objective.
-2. `PROJECT_HANDOVER.md` — exact continuation point, verified commands, unresolved work, and recovery instructions.
-3. `ARCHITECTURE.md` — component boundaries, MQTT flow, lifecycle, and invariants.
-4. `SECURITY.md` — non-negotiable security rules.
-5. `ROADMAP.md` — ordered implementation plan.
+## Top-level files
+
+- `README.md`: mission, philosophy, status, and immediate objective.
+- `ARCHITECTURE.md`: boundaries, DTOs, topics, lifecycle, and invariants.
+- `PROJECT_HANDOVER.md`: continuation point and verified state.
+- `ROADMAP.md`: ordered milestones and acceptance criteria.
+- `SECURITY.md`: threat model, capability rules, secrets, and forbidden behavior.
+- `INDEX.md`: this map.
 
 ## Python gateway
 
 Directory: `node1-gateway/`
 
-Important files:
-
-- `main.py`: FastAPI application and HTTP-facing behavior.
-- `mqtt_service.py`: broker connection, publish/subscribe, and request/reply coordination.
-- `audit.py`: audit records and sinks.
-- `policy_engine.py`: capability and authorization decisions.
-- `command_executor.py`: bounded allowlisted process execution.
-- `workspace_manager.py`: path confinement, snapshots, diffs, and workspace operations.
-- `local_executor.py`: constrained local workspace write implementation.
-- `mqtt_task_protocol.py`: task identity and deadline validation.
+- `main.py`: FastAPI application.
+- `mqtt_service.py`: MQTT connection and request/reply layer.
+- `audit.py`: audit record and sink behavior.
+- `policy_engine.py`: capability decisions.
+- `workspace_manager.py`: safe workspace paths and operations.
+- `local_executor.py`: bounded atomic workspace write.
+- `mqtt_task_protocol.py`: task envelope and deadline validation.
+- `command_executor.py`: bounded allowlist process execution.
 - `work_loop.py`: autonomous goal orchestration.
-- `browser_runtime.py`: browser policy/runtime scaffolding.
-
-Python tests include gateway tests, MQTT tests, executor tests, workspace/work-loop tests, and browser policy tests.
+- `browser_runtime.py`: browser-policy/runtime scaffolding.
 
 ## Go client
 
 Directory: `omniclient/`
 
-Important files:
+- `main.go`: entry point and runtime wiring.
+- `gateway_client.go`: gateway communication and task client behavior.
+- `mcp_server_test.go`: MCP test coverage.
+- `go.mod`, `go.sum`: dependencies.
 
-- `main.go`: client entry point and runtime wiring.
-- `gateway_client.go`: gateway HTTP/MQTT client behavior.
-- `mcp_server_test.go`: MCP-related test coverage.
-- `go.mod` and `go.sum`: dependency declarations.
-
-Before extending Go behavior, inspect existing interfaces rather than creating a second MQTT client or a second request/reply implementation.
-
-## Configuration and runtime
-
-Configuration must come from environment variables or local untracked configuration. Never commit credentials, private keys, `.env` files, virtual environments, caches, or compiled binaries.
-
-The first runtime should use:
+## First symbols to trace
 
 ```text
-broker: loopback only
-node ID: explicit and stable
-workspace: temporary registered directory
-capability: workspace.write
-transport: QoS 1, non-retained tasks
+dispatch_task
+publish
+subscribe
+correlation
+task_id
+goal_id
+workspace.write
+validate_task
+authorize
+execute
+heartbeat
 ```
 
-## Current continuation point
+Before changing a protocol, trace existing implementations and preserve topic names and DTOs.
 
-The last published implementation commit is `325eee3` on `feature/browse-rpc-mqtt`. The next engineering task is to make the real MQTT task path executable end-to-end with one local node.
+## Never commit
 
-## Search strategy for a new contributor
-
-Search these symbols first:
-
-- `dispatch_task`
-- `publish`
-- `subscribe`
-- `correlation`
-- `task_id`
-- `goal_id`
-- `workspace.write`
-- `validate_task`
-- `authorize`
-- `execute`
-- `heartbeat`
-
-Trace the call graph before editing. Preserve existing topic names and DTOs unless a migration is explicitly documented.
-
-## Exclusions
-
-Do not include or inspect as source:
-
-- `venv/`;
-- `__pycache__/`;
-- `.pytest_cache/`;
-- generated binaries;
-- secrets and credentials;
-- temporary scripts such as `update_omninode_loop.ps1` unless deliberately promoted to a maintained tool.
+- virtual environments;
+- Python caches;
+- compiled binaries;
+- secrets, tokens, passwords, cookies, private keys, or `.env` files;
+- temporary operator scripts unless deliberately maintained.

@@ -1,97 +1,118 @@
 # Omninode
 
-Omninode is a distributed AI execution fabric. It connects external AI systems, MCP clients, a FastAPI gateway, MQTT-connected nodes, and local capability-bound executors.
+Omninode is a distributed AI execution fabric: external AI systems express structured intent, trusted gateways coordinate work, MQTT carries messages, and local nodes execute only explicitly authorized capabilities.
 
-The project is designed around a simple principle: an AI should be able to request useful work across trusted devices, but no remote model should receive unrestricted control of a host. Every operation must pass through explicit identity, capability, workspace, policy, deadline, and audit checks.
+The project is built around one principle:
 
-## Project philosophy
+> Remote intelligence may request work; local policy decides whether work may happen.
 
-Omninode is not a remote shell and not a collection of obedient agents. It is a controlled fabric in which autonomous workers retain local authority boundaries while cooperating through a common protocol.
+Omninode is therefore not a remote shell and not a collection of blindly obedient agents. It is a cooperative fabric with local autonomy, least privilege, observable execution, deterministic failure, and gradual delivery.
 
-The design priorities are:
-
-1. Local autonomy: a node decides locally whether an operation is permitted.
-2. Least privilege: capabilities are narrow, explicit, temporary, and auditable.
-3. Transport independence: MQTT carries messages; policy remains in the node executor.
-4. Observable execution: every task has an identity, lifecycle, result, and audit trail.
-5. Safe failure: invalid, expired, duplicated, or unauthorized work is rejected deterministically.
-6. Incremental delivery: first make one real end-to-end path work, then add persistence, cloud deployment, and richer tools.
-
-## Current branch and status
+## Current status
 
 Active branch: `feature/browse-rpc-mqtt`
 
-Current published commit at the time of this handover: `325eee3`
+Latest documentation checkpoint before this update: `eb678f9`
 
-Validated locally before the documentation update:
+Current state:
 
-- Python gateway tests: 15 passed, 1 warning.
-- Python bytecode compilation: passed.
-- Go tests: passed.
-- `go vet ./...`: passed.
-- `git diff --check`: passed.
-- No commit or push should be forced over remote history.
+- Python gateway present.
+- Go `omniclient` present.
+- MQTT service and request/reply scaffolding present.
+- Capability, audit, workspace, executor, browser-policy, and work-loop modules present.
+- Documentation and AI handover guides are being consolidated.
+- Local unit and language checks previously passed.
+- The real MQTT vertical slice is the next operational milestone.
 
-The repository is not yet production-ready. The most important unfinished work is the real MQTT end-to-end path from an MCP dispatch to a local `omniclient` executor and back.
+Do not describe the system as production-ready until a real task has traversed gateway → MQTT → local node → executor → correlated response.
 
-## Architecture at a glance
+## Philosophy
+
+Omninode favors:
+
+- local authority over remote control;
+- explicit capabilities over implicit trust;
+- structured tasks over shell strings;
+- auditability over invisible automation;
+- safe denial over unsafe convenience;
+- a small real vertical slice over a broad mock system;
+- documented decisions over repeated rediscovery.
+
+Autonomy means that workers can decide and coordinate within their granted boundaries. It does not mean bypassing security, hiding activity, evading anti-bot systems, or accessing a host without authorization.
+
+## System flow
 
 ```text
-External AI / MCP host
-        |
-        v
-omniclient MCP server
-        |
-        v
-Gateway client / FastAPI gateway
-        |
-        v
+AI / MCP host
+    |
+    v
+Go omniclient MCP interface
+    |
+    v
+FastAPI gateway
+    |
+    v
 MQTT broker
-        |
-        v
-Local omniclient node
-        |
-        v
-Capability-bound executor
-        |
-        v
-Authorized workspace or local resource
+    |
+    v
+Node-specific omniclient subscriber
+    |
+    v
+Policy + capability + workspace checks
+    |
+    v
+Local executor
+    |
+    v
+Authorized resource
 ```
 
-MQTT is a transport and coordination layer. It is not the authorization boundary. The local node must validate the complete task before touching the filesystem, starting a process, or controlling a browser.
+MQTT is a transport and coordination mechanism. It is not the final authorization boundary. The local node must validate identity, capability, workspace, path, deadline, and budget before performing work.
 
-## Implemented building blocks
+## First useful capability
 
-The current branch contains or modifies:
+The first operational capability is `workspace.write`:
 
-- FastAPI gateway endpoints and gateway-side MQTT integration.
-- Thread-safe MQTT request/reply support.
-- Go `omniclient` gateway client and MCP-related code.
-- Audit, policy, command-execution, workspace, and autonomous work-loop modules.
-- Browser runtime policy scaffolding with human-handoff requirements for friction events.
-- A local workspace executor supporting constrained atomic writes.
-- Task validation for node identity, UUIDs, capability, task type, and deadlines.
+- caller supplies a registered `workspace_id`;
+- path is relative to that workspace;
+- traversal, absolute paths, symlink escape, sensitive directories, and oversized content are rejected;
+- write is atomic;
+- result reports task identity and bounded metadata;
+- every decision is auditable.
 
-## Immediate operational goal
+Do not begin with arbitrary shell execution, real Desktop-wide access, credentials, personal browser profiles, or browser anti-detection.
 
-Make this path work with a local broker and a temporary workspace:
+## Repository guides
+
+Read in this order:
+
+1. `docs/AI_ONBOARDING.md` — complete prompt and reconstruction procedure for a new AI.
+2. `PROJECT_HANDOVER.md` — current engineering state and immediate continuation task.
+3. `docs/REPOSITORY_MAP.md` — file ownership and call-graph navigation.
+4. `ARCHITECTURE.md` — component boundaries and protocol model.
+5. `SECURITY.md` — non-negotiable guardrails.
+6. `docs/OPERATIONS_RUNBOOK.md` — synchronization, validation, local runtime, and recovery.
+7. `ROADMAP.md` — ordered milestones.
+8. `INDEX.md` — compact navigation index.
+
+## Immediate milestone
+
+Implement and demonstrate one local vertical slice:
 
 ```text
-MCP dispatch_task
-  -> gateway accepts task
-  -> gateway publishes MQTT task
-  -> local node receives task
-  -> local node validates capability and workspace
-  -> executor creates one authorized file
-  -> local node publishes correlated response
+MCP/HTTP dispatch
+  -> FastAPI creates a structured task
+  -> MQTT publishes to one node topic
+  -> local omniclient receives it
+  -> local policy validates it
+  -> workspace.write creates one temporary file
+  -> node publishes correlated response
   -> gateway/MCP returns the real result
 ```
 
-The first real capability should remain `workspace.write`. Do not begin with arbitrary shell commands, Desktop-wide access, browser automation, or public cloud exposure.
+Use a loopback broker and a temporary workspace first. Add persistence, TLS, network ACLs, cloud deployment, scheduling, and dashboards only after this path is real and observable.
 
-## Local synchronization
-
-After documentation or code is published remotely:
+## Synchronization
 
 ```powershell
 Set-Location A:\omninode
@@ -100,20 +121,8 @@ git pull --ff-only origin feature/browse-rpc-mqtt
 git status --short
 ```
 
-Do not use `git reset --hard` or `git push --force` unless an explicit recovery decision has been made and the affected commits are backed up.
-
-## Recommended next actions
-
-1. Pull this branch locally.
-2. Inspect the actual MQTT interfaces in `node1-gateway/mqtt_service.py` and `omniclient/gateway_client.go`.
-3. Implement the real local-node subscriber and dispatcher without changing the security model.
-4. Use a broker on loopback only for the first operational run.
-5. Send one `workspace.write` task to a temporary workspace.
-6. Add persistence and retry only after the end-to-end result is real and observable.
-7. Configure TLS and topic ACLs before connecting nodes over a network.
+Never use `git reset --hard` or `git push --force` to hide an ordinary synchronization problem.
 
 ## Non-goals
 
-Omninode must not implement anti-bot evasion, fingerprint spoofing, CAPTCHA bypass, unrestricted remote shell, credential harvesting, silent account creation, or uncontrolled access to personal profiles.
-
-For the complete recovery context, read `PROJECT_HANDOVER.md`. For the task sequence, read `ROADMAP.md`. For security rules, read `SECURITY.md`. For file ownership and navigation, read `INDEX.md`.
+The project must not implement unrestricted remote shell, credential harvesting, fingerprint spoofing, WebDriver masking, CAPTCHA bypass, synthetic biometric interaction, proxy rotation for evasion, silent account creation, or unauthorized access to personal profiles.

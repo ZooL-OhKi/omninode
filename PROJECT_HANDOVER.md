@@ -1,22 +1,32 @@
 # Omninode Project Handover
 
-## Handover purpose
+## Handover contract
 
-This document is the authoritative continuation point for the next human or AI engineer. It records what is known, what was verified, what remains incomplete, and how to proceed without repeating unsafe or redundant work.
+This document is the engineering continuation contract. A new contributor or AI must be able to identify the repository, reconstruct the design, verify the environment, locate the implementation, and choose the next safe action without relying on private conversation history.
 
-## Repository identity
+For a full reconstruction prompt, read `docs/AI_ONBOARDING.md`. For exact file responsibilities, read `docs/REPOSITORY_MAP.md`. For commands and recovery, read `docs/OPERATIONS_RUNBOOK.md`.
+
+## Identity
 
 Repository: `ZooL-OhKi/omninode`
 
-Active branch: `feature/browse-rpc-mqtt`
+Branch: `feature/browse-rpc-mqtt`
 
-Last published implementation commit before this documentation update: `325eee3`
+Last implementation checkpoint before this documentation organization: `325eee3`
 
-The branch was rebased onto the remote history and pushed successfully. Do not force-push over it.
+Last documentation checkpoint before this organization: `eb678f9`
 
-## Verified state
+The documentation-only organization change must not alter Python or Go behavior.
 
-The following checks passed in the local working copy:
+## Philosophy
+
+Omninode is a distributed AI execution fabric, not a remote shell. Remote intelligence expresses intent; the gateway coordinates; MQTT transports; local policy authorizes; the node executes only explicit capabilities.
+
+The design optimizes for local autonomy, least privilege, auditability, deterministic denial, and incremental proof. A worker is autonomous inside a boundary, never above it.
+
+## Verified baseline
+
+Previously verified locally:
 
 ```text
 Python pytest: 15 passed, 1 warning
@@ -24,69 +34,64 @@ Python compileall: passed
 go test ./...: passed
 go vet ./...: passed
 git diff --check: passed
+git push: succeeded for feature/browse-rpc-mqtt
 ```
 
-The warning is a Starlette/AnyIO deprecation warning and did not fail the suite.
+The warning was a Starlette/AnyIO deprecation warning.
 
-## What has been implemented
+## Implemented areas
 
-The branch contains:
-
-- FastAPI gateway changes.
-- MQTT service changes.
-- Go gateway client changes.
-- MCP-related Go changes and tests.
+- FastAPI gateway and MQTT service scaffolding.
+- Go gateway client and MCP-related code.
 - Audit and policy modules.
+- Workspace confinement and atomic local writes.
 - Allowlisted command executor.
-- Workspace manager.
 - Autonomous work-loop scaffolding.
 - Browser runtime policy scaffolding.
-- Local workspace executor.
-- MQTT task protocol validation.
-- Detailed project documentation.
+- Task envelope validation.
+- Detailed project documentation and AI onboarding guides.
 
-## What is not yet proven
+## Not proven yet
 
-Do not claim the project is production-ready yet. The following are not proven by the unit tests above:
+Do not claim production readiness until these are demonstrated:
 
-1. A real broker delivers a task from gateway to a local Go node.
-2. The Go node performs the capability-bound operation.
-3. The node publishes a correlated response.
-4. The gateway maps the response back to the correct HTTP/MCP request under concurrency.
-5. Duplicate delivery is idempotent.
-6. A network deployment is protected with TLS and topic ACLs.
-7. Oracle deployment and rollback are automated.
+1. Gateway publishes a real task to MQTT.
+2. A local Go node subscribes to its own task topic.
+3. The node validates and executes `workspace.write`.
+4. The node publishes a response with matching correlation and task IDs.
+5. The gateway/MCP client returns the real result under concurrency.
+6. Duplicate delivery is idempotent.
+7. Network transport uses TLS and topic ACLs.
+8. Cloud deployment has health checks and rollback.
 
-## Immediate continuation task
+## Immediate next action
 
-Implement and run one local vertical slice:
+Implement one local vertical slice only:
 
 ```text
-POST or MCP dispatch_task
-  -> gateway task creation
-  -> MQTT publish to node task topic
-  -> local node subscription
-  -> task validation
-  -> workspace.write executor
-  -> MQTT response
-  -> gateway status/result
+MCP or HTTP
+  -> FastAPI task creation
+  -> MQTT publish
+  -> node-specific Go subscriber
+  -> local validation
+  -> workspace.write in temporary workspace
+  -> MQTT correlated response
+  -> real MCP/HTTP result
 ```
 
-Use a temporary workspace under the repository or an explicitly configured runtime directory. Do not write to the real Desktop until the capability and approval model is verified.
+Before coding, inspect the actual interfaces in `node1-gateway/mqtt_service.py`, `node1-gateway/main.py`, `omniclient/main.go`, and `omniclient/gateway_client.go`. Do not create a second protocol or assume names from documentation are already wired.
 
-## Required implementation rules
+## Required safety constraints
 
-- Reuse existing MQTT service and gateway client interfaces.
-- Do not create a second competing protocol.
-- Do not accept arbitrary shell text.
-- Do not expose the broker publicly during local development.
-- Keep task payloads structured and versioned.
-- Include `task_id`, `goal_id`, `agent_id`, `node_id`, capability, and deadline.
-- Record allow and deny decisions.
-- Return explicit statuses: `queued`, `running`, `completed`, `failed`, `blocked`, or `expired`.
-- Preserve idempotency when adding retries.
+- no arbitrary shell strings;
+- no public broker during loopback development;
+- no Desktop-wide write by default;
+- no credentials or personal browser profiles;
+- no anti-bot evasion;
+- no force-push or destructive reset;
+- no claim of operational success without a real result.
 
-## Safe local synchronization
+## Pull procedure
 
 ```powershell
 Set-Location A:\omninode
@@ -95,78 +100,47 @@ git pull --ff-only origin feature/browse-rpc-mqtt
 git status --short
 ```
 
-If the working tree contains intentional local changes, stop and inspect them before pulling. Do not use `reset --hard` to solve ordinary synchronization issues.
-
-## Recommended execution order
-
-1. Read this file, `README.md`, `ARCHITECTURE.md`, and `SECURITY.md`.
-2. Inspect `node1-gateway/mqtt_service.py`.
-3. Inspect `omniclient/gateway_client.go` and `omniclient/main.go`.
-4. Identify the existing topic, DTO, and request/reply interfaces.
-5. Implement the smallest real node-side subscriber.
-6. Run one local `workspace.write` operation.
-7. Add status retrieval and idempotency.
-8. Configure TLS and ACLs.
-9. Only then consider cloud deployment and dashboard work.
-
-## Definition of done for the next milestone
-
-The next milestone is complete when a real MCP task creates one file in an authorized temporary workspace, returns the actual path and byte count, and rejects an unauthorized path or capability without touching the host.
+If local changes exist, preserve them and inspect before pulling.
 
 ## AI continuation prompt
 
-Paste the following prompt into a new AI session:
-
 ```text
-You are the next Principal Distributed Systems Architect and AI Systems Engineer for Omninode.
+You are the next Principal Distributed Systems Architect and Expert AI Systems Engineer for Omninode.
 
-Omninode is a distributed AI execution fabric, not a remote shell. Its philosophy is local autonomy with explicit capabilities, least privilege, observable execution, deterministic failure, and incremental delivery. A remote AI may request work, but the local node is the final authority over its filesystem, processes, browser, and credentials.
+Start by reading, in order:
+1. docs/AI_ONBOARDING.md
+2. PROJECT_HANDOVER.md
+3. docs/REPOSITORY_MAP.md
+4. ARCHITECTURE.md
+5. SECURITY.md
+6. docs/OPERATIONS_RUNBOOK.md
+7. ROADMAP.md
+8. INDEX.md
+
+Omninode is a distributed AI execution fabric, not a remote shell. Its philosophy is local autonomy, explicit capabilities, least privilege, auditability, deterministic failure, and incremental proof. A remote AI can request work, but the local node is the final authority over its filesystem, processes, browser, and credentials.
 
 Repository: ZooL-OhKi/omninode
 Branch: feature/browse-rpc-mqtt
-Last implementation commit: 325eee3
+Implementation checkpoint: 325eee3
+Documentation checkpoint before this organization: eb678f9
 
-Read these files before changing anything:
-1. PROJECT_HANDOVER.md
-2. README.md
-3. ARCHITECTURE.md
-4. SECURITY.md
-5. ROADMAP.md
-6. INDEX.md
+Your first job is not to rewrite the project. Reconstruct the current system from the repository. Inspect actual code and identify:
+- current FastAPI endpoints;
+- MQTT broker/client library and topic names;
+- gateway request/reply state;
+- Go subscriber or node runtime;
+- task DTOs and correlation fields;
+- policy and workspace enforcement;
+- how MCP dispatch maps to gateway calls.
 
-Then inspect:
-- node1-gateway/main.py
-- node1-gateway/mqtt_service.py
-- node1-gateway/policy_engine.py
-- node1-gateway/audit.py
-- node1-gateway/local_executor.py
-- node1-gateway/mqtt_task_protocol.py
-- node1-gateway/workspace_manager.py
-- omniclient/main.go
-- omniclient/gateway_client.go
+Then implement the smallest real vertical slice:
+MCP/HTTP dispatch -> FastAPI -> MQTT task topic -> local omniclient subscriber -> capability validation -> workspace.write -> correlated MQTT response -> real result.
 
-Current verified checks:
-- Python: 15 tests passed, one deprecation warning.
-- compileall passed.
-- Go tests passed.
-- go vet passed.
-- git diff --check passed.
+Use only structured tasks with schema_version, task_id, goal_id, agent_id, node_id, capability, deadline, and payload. Preserve existing interfaces unless a migration is documented. Use a loopback broker and temporary workspace first. Do not implement arbitrary shell execution, credential access, browser anti-detection, CAPTCHA bypass, public broker exposure, or silent privilege elevation.
 
-The immediate goal is not a broad rewrite. Implement one real local vertical slice:
-MCP or HTTP dispatch -> FastAPI gateway -> MQTT task topic -> local omniclient subscriber -> capability validation -> workspace.write -> MQTT correlated response -> gateway/MCP result.
-
-Use structured JSON tasks with schema version, task_id, goal_id, agent_id, node_id, capability, deadline, and payload. Preserve existing interfaces and topic names unless you document a migration. Use MQTT request/reply correlation, idempotency, bounded deadlines, and explicit statuses.
-
-The only initial capability should be workspace.write. It must use a registered workspace, relative paths, path resolution, traversal and symlink protection, file-size limits, atomic writes, and audit records. Do not implement arbitrary shell execution, credential access, browser anti-detection, CAPTCHA bypass, or public broker exposure.
-
-Use a loopback broker for the first operational run. Do not claim production readiness until the real end-to-end path has executed. After implementation, report:
-- files changed;
-- protocol and topic decisions;
-- security decisions;
-- commands run;
-- exact results;
-- unresolved risks;
-- next milestone.
-
-Never commit or push without explicit approval. Never use reset --hard or force-push to hide synchronization problems.
+Before editing, report the current call graph and the smallest missing link. After editing, report exact files, commands, results, limitations, and the next milestone. Do not claim success based only on unit tests; prove one real task result.
 ```
+
+## Definition of done
+
+The next milestone is complete when an MCP or HTTP request creates one real file in an authorized temporary workspace through the complete gateway/MQTT/local-node path and returns its actual result, while unauthorized paths and capabilities are blocked.

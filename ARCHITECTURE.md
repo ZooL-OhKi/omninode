@@ -1,42 +1,26 @@
 # Omninode Architecture
 
-## 1. Mission
+## Purpose
 
-Omninode is a distributed fabric for AI-assisted and autonomous work across trusted nodes. A remote AI can request work, but execution authority remains local to the node that owns the resource.
+Omninode is a distributed fabric for AI-assisted and autonomous work across trusted nodes. It separates intent, coordination, transport, authorization, and execution so that no remote request automatically becomes host authority.
 
-The architecture separates four concerns:
+## Component model
 
-1. Intent: an AI or MCP client expresses a goal.
-2. Coordination: the gateway validates and routes a task.
-3. Transport: MQTT delivers the task and response.
-4. Execution: the local node applies policy and performs the authorized operation.
+### AI and MCP host
 
-This separation is intentional. MQTT delivery must never imply authorization.
-
-## 2. Components
-
-### External AI and MCP host
-
-The AI-facing layer chooses a tool and submits structured input. It must receive a structured result rather than an assertion that work was performed.
+The AI chooses a typed tool and submits structured input. It must receive a structured result, not a claim that work happened.
 
 ### Go `omniclient`
 
-`omniclient` has two roles:
-
-- expose MCP tools such as node discovery and task dispatch;
-- act as a lightweight node-side client that can communicate with the gateway or broker.
-
-The Go client must not convert arbitrary model text into shell commands. It should pass structured tasks to a capability-aware executor.
+`omniclient` is the lightweight integration surface. It exposes MCP-facing operations and participates in gateway/node communication. It must not turn model text into arbitrary shell commands.
 
 ### FastAPI gateway
 
-The gateway provides HTTP APIs, tracks node state, validates request shape, and dispatches tasks through MQTT. It should return `202 Accepted` for work that is not completed within the request lifetime and expose a status lookup by goal or task ID.
-
-The gateway is not the final authority over a local filesystem. It may route a task, but the node must authorize it again.
+The gateway exposes HTTP, validates request shape, tracks nodes and tasks, and publishes MQTT work. It is a coordinator, not the final authority over a local filesystem.
 
 ### MQTT broker
 
-MQTT provides asynchronous delivery, heartbeat propagation, and request/reply coordination. Recommended topic shape:
+MQTT transports tasks, responses, heartbeats, and events. Recommended topics:
 
 ```text
 omninode/v1/nodes/{node_id}/tasks
@@ -45,105 +29,97 @@ omninode/v1/nodes/{node_id}/heartbeat
 omninode/v1/nodes/{node_id}/events
 ```
 
-A node subscribes only to its own task topic. A gateway subscribes only to authorized response topics.
+A node subscribes only to its own task topic. Executable task messages are never retained.
 
-### Local executor
+### Local node executor
 
-The executor performs only named capabilities. The first capability is `workspace.write`, which accepts a registered workspace ID, a relative path, and bounded content. It must use atomic replacement and reject traversal, absolute paths, sensitive locations, oversized content, and symlink escapes.
+The node validates the task again and dispatches only named capabilities. The first capability is `workspace.write`.
 
-## 3. Task lifecycle
+## Canonical task envelope
 
-```text
-created
-  -> validated
-  -> queued
-  -> dispatched
-  -> running
-  -> completed | failed | blocked | expired
+```json
+{
+  "schema_version": 1,
+  "task_id": "uuid",
+  "goal_id": "uuid",
+  "agent_id": "agent-id",
+  "node_id": "node-local",
+  "task_type": "workspace.write",
+  "capability": "workspace.write",
+  "created_at": "2026-09-22T13:00:00Z",
+  "deadline_at": "2026-09-22T13:05:00Z",
+  "payload": {
+    "workspace_id": "temporary",
+    "path": "hello.txt",
+    "content": "hello"
+  }
+}
 ```
 
-Every transition should carry a task ID, goal ID, node ID, agent ID, timestamp, and audit record.
+Response envelope:
 
-A task must include:
+```json
+{
+  "schema_version": 1,
+  "task_id": "uuid",
+  "goal_id": "uuid",
+  "node_id": "node-local",
+  "status": "completed",
+  "data": {
+    "path": "hello.txt",
+    "bytes_written": 5
+  },
+  "error": null
+}
+```
 
-- schema version;
-- task ID and goal ID;
-- agent ID;
-- target node ID;
-- task type;
-- capability;
-- creation time;
-- absolute deadline;
-- structured payload.
+## Lifecycle
 
-## 4. MQTT request/reply
+```text
+created -> validated -> queued -> dispatched -> running
+                                             |        |
+                                             v        v
+                                         completed  failed
+                                             |
+                                         blocked/expired
+```
 
-Use MQTT 5 request/reply properties where the client library supports them:
+Every transition must be attributable to a task, goal, agent, node, timestamp, decision, and audit record.
 
-- response topic identifies the response destination;
-- correlation data contains the request correlation identifier;
-- the JSON body still contains `task_id` and `goal_id` for diagnostics and compatibility.
+## Request/reply
 
-The gateway must maintain a thread-safe pending-request map keyed by correlation ID. A response must be rejected or quarantined if it has no matching pending request, wrong node identity, malformed JSON, or an expired deadline.
+Use MQTT 5 response-topic and correlation-data properties when supported by the client library. Keep `task_id` and `goal_id` in the JSON body for diagnostics and compatibility.
 
-QoS 1 is appropriate for task delivery when the application implements idempotency. Retained messages must not be used for executable tasks.
+The gateway needs a thread-safe pending map keyed by correlation ID. It must reject malformed, late, unknown, or wrong-node replies. QoS 1 is acceptable only when task execution is idempotent.
 
-## 5. Idempotency
+## Node execution boundary
 
-The node must maintain a bounded result cache or persistent task record. For the same task ID:
+The local executor must verify:
 
-- same payload: return the original result;
-- different payload: return a conflict;
-- expired task: do not execute;
-- already running task: return an in-progress state.
-
-Retries must be bounded and use deadline-aware backoff. Authorization failures are not retryable.
-
-## 6. Security boundaries
-
-The local node is the final security boundary. It must validate:
-
-- authenticated node identity;
+- node identity;
 - agent and goal identity;
 - capability;
-- workspace registration;
-- relative path containment after resolution;
-- symlink behavior;
-- content and output budgets;
-- deadline and approval policy.
+- registered workspace;
+- normalized relative path;
+- symlink containment;
+- size and time budgets;
+- approval and deadline policy.
 
-No component may turn an arbitrary `path`, `command`, or browser instruction into unrestricted host access.
+Transport delivery never bypasses these checks.
 
-## 7. Browser runtime
+## Browser boundary
 
-Browser execution is a separate capability. Use isolated browser contexts, ephemeral profiles by default, explicit domain allowlists, bounded uploads/downloads, and human handoff for CAPTCHA, MFA, payment, credential requests, account creation, or anti-bot friction.
+Browser support is an independent capability and must use isolated contexts, ephemeral profiles by default, domain allowlists, bounded transfers, and human handoff for CAPTCHA, MFA, payment, credential requests, account creation, or anti-bot friction.
 
-Do not implement fingerprint spoofing, `navigator.webdriver` masking, WebGL or Canvas spoofing, movement biometrics, CAPTCHA bypass, proxy rotation for evasion, or use of personal browser profiles.
+No fingerprint spoofing, WebDriver masking, Canvas/WebGL/Audio spoofing, synthetic biometrics, evasion proxy rotation, CAPTCHA bypass, or personal browser-profile reuse.
 
-## 8. Operational phases
+## Deployment phases
 
-### Phase A: local vertical slice
+1. Loopback local vertical slice.
+2. Reliable task lifecycle and idempotency.
+3. TLS and per-node topic ACLs.
+4. Multi-node health, routing, capacity, and cancellation.
+5. Cloud deployment and protected CI/CD.
+6. Browser and dashboard capabilities.
 
-Run broker, gateway, and one local node on loopback. Prove one authorized `workspace.write` operation.
-
-### Phase B: reliable task lifecycle
-
-Add `202` goal submission, status retrieval, idempotency, deadline handling, and persistence.
-
-### Phase C: secured network fabric
-
-Add TLS, per-node identity, topic ACLs, credential rotation, and network restrictions.
-
-### Phase D: multi-node and cloud
-
-Deploy only after the local vertical slice is observable and recoverable. Add health, heartbeats, capacity, and rollout controls.
-
-## 9. Architectural invariants
-
-- Transport does not grant authority.
-- Every task is attributable.
-- Every write is confined to a registered workspace.
-- Deny is the default.
-- Expired work is not executed.
-- Remote models cannot silently elevate capabilities.
-- Production deployment follows, rather than precedes, a working local vertical slice.
+Do not reverse this order.

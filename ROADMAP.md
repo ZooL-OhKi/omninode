@@ -1,115 +1,63 @@
 # Omninode Roadmap
 
-The roadmap is execution-first. Every phase must leave the system in a more observable and recoverable state.
+See `NEXT_STEPS.md` for the detailed execution plan. This file provides the phase-level view.
 
-## Phase 0 — Baseline and documentation
+## Phase 0 — Baseline and reconstruction
 
 Status: complete.
 
-- repository and branch identified;
-- FastAPI gateway and Go client present;
-- MQTT scaffolding present;
-- policy, audit, workspace, executor, browser, and work-loop modules present;
-- local checks previously passed;
-- detailed handover, repository map, onboarding guide, and operations runbook available.
+Repository, branch, implementation checkpoint, documentation, security model, repository map, onboarding prompt, and operations runbook are available.
 
 ## Phase 1 — Real local vertical slice
 
 Status: next.
 
-Implement exactly one operation:
+MCP/HTTP → FastAPI → MQTT → local `omniclient` → policy → `workspace.write` → correlated response.
 
-```text
-MCP/HTTP -> FastAPI -> MQTT -> local omniclient -> policy -> workspace.write -> MQTT response
-```
-
-Acceptance:
-
-- broker runs on loopback;
-- one node subscribes only to its own task topic;
-- task has identity, deadline, capability, and structured payload;
-- file is actually created in a temporary registered workspace;
-- response contains matching IDs and real metadata;
-- invalid node, capability, deadline, traversal, and workspace are rejected;
-- no shell string is executed.
+The first result must be a real file in a temporary registered workspace, not a mock.
 
 ## Phase 2 — Reliable task lifecycle
 
 Status: planned.
 
-- `202 Accepted` for queued work;
-- status endpoint by goal ID;
-- queued/running/completed/failed/blocked/expired states;
-- idempotency and duplicate handling;
-- bounded retry and deadline-aware backoff;
-- SQLite task history if needed;
-- audit retention and cleanup.
+202 responses, status endpoint, durable task identity, explicit states, deadlines, idempotency, bounded retries, duplicate control, and audit retention.
 
 ## Phase 3 — Secure network fabric
 
 Status: planned.
 
-- TLS or mTLS;
-- per-node identity;
-- topic ACLs;
-- secret rotation;
-- isolated broker listeners;
-- monitoring and alerting.
+TLS/mTLS, per-node identity, topic ACLs, credential rotation, anonymous-access denial, reconnect behavior, and unauthorized-access monitoring.
 
 ## Phase 4 — Multi-node orchestration
 
 Status: planned.
 
-- registration and heartbeat TTL;
-- capability advertisement;
-- capacity and availability;
-- routing and backpressure;
-- cancellation and node drain;
-- deterministic retry ownership.
+Registration, heartbeats, capability advertisement, routing, backpressure, concurrency limits, cancellation, drain, and retry ownership.
 
 ## Phase 5 — MCP productization
 
 Status: planned.
 
-- stable schemas;
-- progress and error semantics;
-- supported-host configuration;
-- compatibility matrix;
-- operator documentation.
+Stable schemas, progress semantics, configuration examples, supported-host compatibility, and real error propagation.
 
 ## Phase 6 — Browser capability
 
 Status: planned and constrained.
 
-- isolated ephemeral contexts;
-- domain allowlists;
-- bounded uploads/downloads;
-- human handoff for friction;
-- no anti-detection or bypass features.
+Isolated contexts, ephemeral profiles, domain allowlists, bounded transfers, human handoff, and no evasion/bypass features.
 
-## Phase 7 — Cloud deployment
+## Phase 7 — Oracle deployment and CI/CD
 
-Status: blocked until Phase 3.
+Status: blocked until Phases 1 and 3 are complete.
 
-- Oracle staging;
-- packaging;
-- protected GitHub Actions;
-- secrets management;
-- health checks;
-- rollback;
-- resource budgets.
+Packaging, staging, secrets, health, rollback, protected workflows, and resource budgets.
 
-## Phase 8 — Operator experience
+## Phase 8 — Dashboard and operator experience
 
 Status: later.
 
-- dashboard;
-- task timeline;
-- node health;
-- audit viewer;
-- approval UI;
-- cancellation.
+Timeline, node health, audit viewer, approvals, cancellation, and dashboard.
 
 ## Sequencing rule
 
-Do not prioritize dashboard, broad autonomy, browser automation, or cloud deployment over the first real local task result.
+Do not move to dashboards, broad autonomy, browser automation, or public cloud deployment until Phase 1 has produced a real end-to-end result and Phase 3 has established network security.

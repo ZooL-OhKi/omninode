@@ -32,25 +32,25 @@ func NewOmninodeServer() *OmninodeServer {
         gateway:    NewGatewayClientFromEnv(),
         nodeStatus: make(map[string]NodeStatus),
     }
-    s.mcpServer = mcp.NewServer(&mcp.ServerOptions{}, nil)
+    s.mcpServer = mcp.NewServer(&mcp.Implementation{}, nil)
     s.registerTools()
     return s
 }
 
 func (s *OmninodeServer) registerTools() {
-    s.mcpServer.AddTool(mcp.Tool{
+    s.mcpServer.AddTool(&mcp.Tool{
         Name: "list_nodes",
         Description: "List all connected Omninode nodes with their status",
     }, s.handleListNodes)
-    s.mcpServer.AddTool(mcp.Tool{
+    s.mcpServer.AddTool(&mcp.Tool{
         Name: "get_node_status",
         Description: "Get status of a specific node",
     }, s.handleGetNodeStatus)
-    s.mcpServer.AddTool(mcp.Tool{
+    s.mcpServer.AddTool(&mcp.Tool{
         Name: "dispatch_task",
         Description: "Dispatch a computation task to an online node",
     }, s.handleDispatchTask)
-    s.mcpServer.AddTool(mcp.Tool{
+    s.mcpServer.AddTool(&mcp.Tool{
         Name: "get_fabric_health",
         Description: "Get overall health status of the Omninode fabric",
     }, s.handleGetFabricHealth)
@@ -64,7 +64,7 @@ func toolResult(value any) (*mcp.CallToolResult, error) {
     return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: string(data)}}}, nil
 }
 
-func (s *OmninodeServer) handleListNodes(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+func (s *OmninodeServer) handleListNodes(ctx context.Context, req mcp.ServerRequest[*mcp.CallToolParamsRaw]) (*mcp.CallToolResult, error) {
     if s.gateway != nil {
         nodes, err := s.gateway.ListNodes()
         if err != nil {
@@ -81,10 +81,10 @@ func (s *OmninodeServer) handleListNodes(ctx context.Context, req mcp.CallToolRe
     return toolResult(nodes)
 }
 
-func (s *OmninodeServer) handleGetNodeStatus(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-    args, ok := req.Params.Arguments.(map[string]any)
-    if !ok {
-        return nil, fmt.Errorf("invalid arguments")
+func (s *OmninodeServer) handleGetNodeStatus(ctx context.Context, req mcp.ServerRequest[*mcp.CallToolParamsRaw]) (*mcp.CallToolResult, error) {
+    var args map[string]any
+    if err := json.Unmarshal(req.Params.Arguments, &args); err != nil {
+        return nil, fmt.Errorf("invalid arguments: %w", err)
     }
     nodeID, ok := args["node_id"].(string)
     if !ok || nodeID == "" {
@@ -104,10 +104,10 @@ func (s *OmninodeServer) handleGetNodeStatus(ctx context.Context, req mcp.CallTo
     return toolResult(node)
 }
 
-func (s *OmninodeServer) handleDispatchTask(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-    args, ok := req.Params.Arguments.(map[string]any)
-    if !ok {
-        return nil, fmt.Errorf("invalid arguments")
+func (s *OmninodeServer) handleDispatchTask(ctx context.Context, req mcp.ServerRequest[*mcp.CallToolParamsRaw]) (*mcp.CallToolResult, error) {
+    var args map[string]any
+    if err := json.Unmarshal(req.Params.Arguments, &args); err != nil {
+        return nil, fmt.Errorf("invalid arguments: %w", err)
     }
     nodeID, ok := args["node_id"].(string)
     if !ok || nodeID == "" {
@@ -131,7 +131,7 @@ func (s *OmninodeServer) handleDispatchTask(ctx context.Context, req mcp.CallToo
     return toolResult(result)
 }
 
-func (s *OmninodeServer) handleGetFabricHealth(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+func (s *OmninodeServer) handleGetFabricHealth(ctx context.Context, req mcp.ServerRequest[*mcp.CallToolParamsRaw]) (*mcp.CallToolResult, error) {
     if s.gateway != nil {
         health, err := s.gateway.FabricHealth()
         if err != nil {

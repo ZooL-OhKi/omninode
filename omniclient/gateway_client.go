@@ -2,84 +2,167 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
-	"strings"
 	"time"
 )
 
-// GatewayClient connects OmniClient to the Node1 Gateway REST API.
+// GatewayClient client HTTP per Omninode Gateway
 type GatewayClient struct {
-	baseURL string
-	apiKey  string
-	http    *http.Client
+	baseURL    string
+	apiKey     string
+	httpClient *http.Client
 }
 
+// ExecuteResult risultato dell'esecuzione codice in sandbox
+type ExecuteResult struct {
+	Stdout   string `json:"stdout"`
+	Stderr   string `json:"stderr"`
+	ExitCode int    `json:"exit_code"`
+	NodeID   string `json:"node_id"`
+}
+
+// NewGatewayClientFromEnv crea client da variabili ambiente
 func NewGatewayClientFromEnv() *GatewayClient {
-	baseURL := strings.TrimRight(os.Getenv("OMNINODE_GATEWAY_URL"), "/")
-	apiKey := os.Getenv("OMNINODE_API_KEY")
-	if baseURL == "" || apiKey == "" {
-		return nil
+	baseURL := os.Getenv("OMNINODE_GATEWAY_URL")
+	if baseURL == "" {
+		baseURL = "http://localhost:8080"
 	}
+	apiKey := os.Getenv("OMNINODE_API_KEY")
 	return &GatewayClient{
 		baseURL: baseURL,
 		apiKey:  apiKey,
-		http:    &http.Client{Timeout: 10 * time.Second},
+		httpClient: &http.Client{
+			Timeout: 30 * time.Second,
+		},
 	}
 }
 
-func (c *GatewayClient) request(method, path string, input any, output any) error {
-	var body io.Reader
-	if input != nil {
-		encoded, err := json.Marshal(input)
+// Execute esegue codice in sandbox su un nodo remoto
+func (g *GatewayClient) Execute(ctx context.Context, language, code string) (*ExecuteResult, error) {
+	payload := map[string]string{
+		"language": language,
+		"code":     code,
+	}
+
+	resp, err := g.doRequest(ctx, "POST", "/api/v1/execute", payload)
+	if err != nil {
+		return nil, err
+	}
+
+	var result ExecuteResult
+	if err := json.Unmarshal(resp, &result); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal execute response: %w", err)
+	}
+
+	return &result, nil
+}
+
+// ListNodes lista tutti i nodi connessi
+func (g *GatewayClient) ListNodes() ([]NodeStatus, error) {
+	resp, err := g.doRequest(context.Background(), "GET", "/api/v1/nodes", nil)
+	if err != nil {
+		return nil, err
+	}
+
+	var nodes []NodeStatus
+	if err := json.Unmarshal(resp, &nodes); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal nodes response: %w", err)
+	}
+
+	return nodes, nil
+}
+
+// GetNode ottiene lo stato di un nodo specifico
+func (g *GatewayClient) GetNode(nodeID string) (NodeStatus, error) {
+	resp, err := g.doRequest(context.Background(), "GET", fmt.Sprintf("/api/v1/nodes/%s", nodeID), nil)
+	if err != nil {
+		return NodeStatus{}, err
+	}
+
+	var node NodeStatus
+	if err := json.Unmarshal(resp, &node); err != nil {
+		return NodeStatus{}, fmt.Errorf("failed to unmarshal node response: %w", err)
+	}
+
+	return node, nil
+}
+
+// DispatchTask dispatcha un task a un nodo
+func (g *GatewayClient) DispatchTask(nodeID, taskType string, payload map[string]any) (map[string]any, error) {
+	body := map[string]any{
+		"task_type": taskType,
+		"payload":   payload,
+	}
+
+	resp, err := g.doRequest(context.Background(), "POST", fmt.Sprintf("/api/v1/nodes/%s/tasks", nodeID), body)
+	if err != nil {
+		return nil, err
+	}
+
+	var result map[string]any
+	if err := json.Unmarshal(resp, &result); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal task response: %w", err)
+	}
+
+	return result, nil
+}
+
+// FabricHealth ottiene la salute del fabric
+func (g *GatewayClient) FabricHealth() (map[string]any, error) {
+	resp, err := g.doRequest(context.Background(), "GET", "/api/v1/health", nil)
+	if err != nil {
+		return nil, err
+	}
+
+	var health map[string]any
+	if err := json.Unmarshal(resp, &health); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal health response: %w", err)
+	}
+
+	return health, nil
+}
+
+// doRequest esegue una request HTTP con auth
+func (g *GatewayClient) doRequest(ctx context.Context, method, path string, body any) ([]byte, error) {
+	var reqBody io.Reader
+	if body != nil {
+		jsonBody, err := json.Marshal(body)
 		if err != nil {
-			return err
+			return nil, fmt.Errorf("failed to marshal request body: %w", err)
 		}
-		body = bytes.NewReader(encoded)
+		reqBody = bytes.NewReader(jsonBody)
 	}
 
-	req, err := http.NewRequest(method, c.baseURL+path, body)
+	url := g.baseURL + path
+	req, err := http.NewRequestWithContext(ctx, method, url, reqBody)
 	if err != nil {
-		return err
-	}
-	req.Header.Set("X-Omninode-Key", c.apiKey)
-	req.Header.Set("Accept", "application/json")
-	if input != nil {
-		req.Header.Set("Content-Type", "application/json")
+		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 
-	resp, err := c.http.Do(req)
+	req.Header.Set("Content-Type", "application/json")
+	if g.apiKey != "" {
+		req.Header.Set("Authorization", "Bearer "+g.apiKey)
+	}
+
+	resp, err := g.httpClient.Do(req)
 	if err != nil {
-		return err
+		return nil, fmt.Errorf("request failed: %w", err)
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		data, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		return fmt.Errorf("gateway returned %s: %s", resp.Status, strings.TrimSpace(string(data)))
+
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read response body: %w", err)
 	}
-	return json.NewDecoder(resp.Body).Decode(output)
-}
 
-func (c *GatewayClient) ListNodes() ([]NodeStatus, error) {
-	var nodes []NodeStatus
-	return nodes, c.request(http.MethodGet, "/nodes", nil, &nodes)
-}
+	if resp.StatusCode >= 400 {
+		return nil, fmt.Errorf("gateway error %d: %s", resp.StatusCode, string(respBody))
+	}
 
-func (c *GatewayClient) GetNode(nodeID string) (NodeStatus, error) {
-	var node NodeStatus
-	return node, c.request(http.MethodGet, "/nodes/"+nodeID, nil, &node)
-}
-
-func (c *GatewayClient) DispatchTask(nodeID, taskType string, payload map[string]any) (map[string]any, error) {
-	result := make(map[string]any)
-	input := map[string]any{"task_type": taskType, "payload": payload}
-	return result, c.request(http.MethodPost, "/nodes/"+nodeID+"/tasks", input, &result)
-}
-
-func (c *GatewayClient) FabricHealth() (map[string]any, error) {
-	result := make(map[string]any)
-	return result, c.request(http.MethodGet, "/fabric/health", nil, &result)
+	return respBody, nil
 }

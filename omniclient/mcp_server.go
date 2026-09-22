@@ -10,6 +10,10 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
+// ============================================================================
+// OMNINODE SERVER
+// ============================================================================
+
 type OmninodeServer struct {
 	mcpServer   *mcp.Server
 	gateway     *GatewayClient
@@ -25,137 +29,181 @@ type NodeStatus struct {
 	Metadata map[string]any `json:"metadata,omitempty"`
 }
 
-func NewOmninodeServer() *OmninodeServer {
-	s := &OmninodeServer{
-		gateway:    NewGatewayClientFromEnv(),
-		nodeStatus: make(map[string]NodeStatus),
+// ============================================================================
+// TOOL: run_sandbox_code
+// ============================================================================
+
+type RunSandboxCodeInput struct {
+	Language string `json:"language" jsonschema:"required,enum=python,enum=javascript,enum=bash,description=Linguaggio di programmazione da usare per l'esecuzione"`
+	Code     string `json:"code" jsonschema:"required,description=Codice sorgente completo da eseguire nella sandbox"`
+}
+
+type RunSandboxCodeOutput struct {
+	Stdout   string `json:"stdout,omitempty"`
+	Stderr   string `json:"stderr,omitempty"`
+	ExitCode int    `json:"exit_code"`
+	NodeID   string `json:"node_id"`
+}
+
+func (s *OmninodeServer) handleRunSandboxCode(
+	ctx context.Context,
+	req *mcp.CallToolRequest,
+	input RunSandboxCodeInput,
+) (*mcp.CallToolResult, RunSandboxCodeOutput, error) {
+	if input.Code == "" {
+		return nil, RunSandboxCodeOutput{}, fmt.Errorf("code cannot be empty")
 	}
-	
-	s.mcpServer = mcp.NewServer(&mcp.Implementation{
-		Name:    "omninode",
-		Version: "0.1.0",
-	}, nil)
-	
-	s.registerTools()
-	return s
-}
 
-func (s *OmninodeServer) registerTools() {
-	// Usa json.RawMessage per InputSchema
-	s.mcpServer.AddTool(&mcp.Tool{
-		Name:        "list_nodes",
-		Description: "List all connected Omninode nodes with their status",
-		InputSchema: json.RawMessage(`{"type":"object"}`),
-	}, s.handleListNodes)
-
-	s.mcpServer.AddTool(&mcp.Tool{
-		Name:        "get_node_status",
-		Description: "Get status of a specific node",
-		InputSchema: json.RawMessage(`{"type":"object","properties":{"node_id":{"type":"string"}},"required":["node_id"]}`),
-	}, s.handleGetNodeStatus)
-
-	s.mcpServer.AddTool(&mcp.Tool{
-		Name:        "dispatch_task",
-		Description: "Dispatch a computation task to an online node",
-		InputSchema: json.RawMessage(`{"type":"object","properties":{"node_id":{"type":"string"},"task_type":{"type":"string"},"payload":{"type":"object"}},"required":["node_id","task_type","payload"]}`),
-	}, s.handleDispatchTask)
-
-	s.mcpServer.AddTool(&mcp.Tool{
-		Name:        "get_fabric_health",
-		Description: "Get overall health status of the Omninode fabric",
-		InputSchema: json.RawMessage(`{"type":"object"}`),
-	}, s.handleGetFabricHealth)
-}
-
-func toolResult(value any) (*mcp.CallToolResult, error) {
-	data, err := json.MarshalIndent(value, "", "  ")
+	result, err := s.gateway.Execute(ctx, input.Language, input.Code)
 	if err != nil {
-		return nil, err
+		return nil, RunSandboxCodeOutput{}, fmt.Errorf("execution failed: %w", err)
 	}
-	return &mcp.CallToolResult{
-		Content: []mcp.Content{
-			&mcp.TextContent{Text: string(data)},
-		},
-	}, nil
+
+	output := RunSandboxCodeOutput{
+		Stdout:   result.Stdout,
+		Stderr:   result.Stderr,
+		ExitCode: result.ExitCode,
+		NodeID:   result.NodeID,
+	}
+
+	return nil, output, nil
 }
 
-func (s *OmninodeServer) handleListNodes(_ context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+// ============================================================================
+// TOOL: list_nodes
+// ============================================================================
+
+type ListNodesInput struct{}
+
+type ListNodesOutput struct {
+	Nodes []NodeStatus `json:"nodes"`
+}
+
+func (s *OmninodeServer) handleListNodes(
+	ctx context.Context,
+	req *mcp.CallToolRequest,
+	input ListNodesInput,
+) (*mcp.CallToolResult, ListNodesOutput, error) {
 	if s.gateway != nil {
 		nodes, err := s.gateway.ListNodes()
 		if err != nil {
-			return nil, err
+			return nil, ListNodesOutput{}, err
 		}
-		return toolResult(nodes)
+		return nil, ListNodesOutput{Nodes: nodes}, nil
 	}
+
 	s.statusMutex.RLock()
 	defer s.statusMutex.RUnlock()
 	nodes := make([]NodeStatus, 0, len(s.nodeStatus))
 	for _, node := range s.nodeStatus {
 		nodes = append(nodes, node)
 	}
-	return toolResult(nodes)
+	return nil, ListNodesOutput{Nodes: nodes}, nil
 }
 
-func (s *OmninodeServer) handleGetNodeStatus(_ context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	var args struct {
-		NodeID string `json:"node_id"`
-	}
-	if err := json.Unmarshal(req.Params.Arguments, &args); err != nil {
-		return nil, err
-	}
-	if args.NodeID == "" {
-		return nil, fmt.Errorf("node_id is required")
-	}
+// ============================================================================
+// TOOL: get_node_status
+// ============================================================================
+
+type GetNodeStatusInput struct {
+	NodeID string `json:"node_id" jsonschema:"required,description=ID del nodo da interrogare"`
+}
+
+type GetNodeStatusOutput struct {
+	NodeStatus
+	Exists bool `json:"exists"`
+}
+
+func (s *OmninodeServer) handleGetNodeStatus(
+	ctx context.Context,
+	req *mcp.CallToolRequest,
+	input GetNodeStatusInput,
+) (*mcp.CallToolResult, GetNodeStatusOutput, error) {
 	if s.gateway != nil {
-		node, err := s.gateway.GetNode(args.NodeID)
+		node, err := s.gateway.GetNode(input.NodeID)
 		if err != nil {
-			return nil, err
+			return nil, GetNodeStatusOutput{Exists: false}, err
 		}
-		return toolResult(node)
+		return nil, GetNodeStatusOutput{NodeStatus: node, Exists: true}, nil
 	}
-	node, exists := s.GetNodeStatus(args.NodeID)
-	if !exists {
-		return toolResult(map[string]string{"error": "node not found"})
-	}
-	return toolResult(node)
+
+	node, exists := s.GetNodeStatus(input.NodeID)
+	return nil, GetNodeStatusOutput{NodeStatus: node, Exists: exists}, nil
 }
 
-func (s *OmninodeServer) handleDispatchTask(_ context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	var args struct {
-		NodeID   string         `json:"node_id"`
-		TaskType string         `json:"task_type"`
-		Payload  map[string]any `json:"payload"`
+// ============================================================================
+// TOOL: dispatch_task
+// ============================================================================
+
+type DispatchTaskInput struct {
+	NodeID   string         `json:"node_id" jsonschema:"required,description=ID del nodo a cui dispatchare il task"`
+	TaskType string         `json:"task_type" jsonschema:"required,description=Tipo di task da eseguire"`
+	Payload  map[string]any `json:"payload" jsonschema:"required,description=Payload del task"`
+}
+
+type DispatchTaskOutput struct {
+	Result map[string]any `json:"result"`
+	NodeID string         `json:"node_id"`
+}
+
+func (s *OmninodeServer) handleDispatchTask(
+	ctx context.Context,
+	req *mcp.CallToolRequest,
+	input DispatchTaskInput,
+) (*mcp.CallToolResult, DispatchTaskOutput, error) {
+	if input.NodeID == "" {
+		return nil, DispatchTaskOutput{}, fmt.Errorf("node_id is required")
 	}
-	if err := json.Unmarshal(req.Params.Arguments, &args); err != nil {
-		return nil, err
-	}
-	if args.NodeID == "" {
-		return nil, fmt.Errorf("node_id is required")
-	}
-	if args.TaskType == "" {
-		return nil, fmt.Errorf("task_type is required")
-	}
-	if args.Payload == nil {
-		return nil, fmt.Errorf("payload is required")
+	if input.TaskType == "" {
+		return nil, DispatchTaskOutput{}, fmt.Errorf("task_type is required")
 	}
 	if s.gateway == nil {
-		return nil, fmt.Errorf("gateway is not configured")
+		return nil, DispatchTaskOutput{}, fmt.Errorf("gateway is not configured")
 	}
-	result, err := s.gateway.DispatchTask(args.NodeID, args.TaskType, args.Payload)
+
+	result, err := s.gateway.DispatchTask(input.NodeID, input.TaskType, input.Payload)
 	if err != nil {
-		return nil, err
+		return nil, DispatchTaskOutput{}, err
 	}
-	return toolResult(result)
+
+	return nil, DispatchTaskOutput{Result: result, NodeID: input.NodeID}, nil
 }
 
-func (s *OmninodeServer) handleGetFabricHealth(_ context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+// ============================================================================
+// TOOL: get_fabric_health
+// ============================================================================
+
+type GetFabricHealthInput struct{}
+
+type GetFabricHealthOutput struct {
+	TotalNodes   int    `json:"total_nodes"`
+	OnlineNodes  int    `json:"online_nodes"`
+	OfflineNodes int    `json:"offline_nodes"`
+	AverageLoad  int    `json:"average_load"`
+	HealthStatus string `json:"health_status"`
+	Mode         string `json:"mode"`
+}
+
+func (s *OmninodeServer) handleGetFabricHealth(
+	ctx context.Context,
+	req *mcp.CallToolRequest,
+	input GetFabricHealthInput,
+) (*mcp.CallToolResult, GetFabricHealthOutput, error) {
 	if s.gateway != nil {
 		health, err := s.gateway.FabricHealth()
 		if err != nil {
-			return nil, err
+			return nil, GetFabricHealthOutput{}, err
 		}
-		return toolResult(health)
+		return nil, GetFabricHealthOutput{
+			TotalNodes:   health["total_nodes"].(int),
+			OnlineNodes:  health["online_nodes"].(int),
+			OfflineNodes: health["offline_nodes"].(int),
+			AverageLoad:  health["average_load"].(int),
+			HealthStatus: health["health_status"].(string),
+			Mode:         health["mode"].(string),
+		}, nil
 	}
+
 	s.statusMutex.RLock()
 	defer s.statusMutex.RUnlock()
 	total, online, load := len(s.nodeStatus), 0, 0
@@ -169,20 +217,66 @@ func (s *OmninodeServer) handleGetFabricHealth(_ context.Context, req *mcp.CallT
 	if online > 0 {
 		averageLoad = load / online
 	}
-	health := map[string]any{
-		"total_nodes":   total,
-		"online_nodes":  online,
-		"offline_nodes": total - online,
-		"average_load":  averageLoad,
-		"health_status": "healthy",
-		"mode":          "local-fallback",
-	}
+	healthStatus := "healthy"
 	if total > 0 && online == 0 {
-		health["health_status"] = "critical"
+		healthStatus = "critical"
 	} else if averageLoad > 80 {
-		health["health_status"] = "warning"
+		healthStatus = "warning"
 	}
-	return toolResult(health)
+	return nil, GetFabricHealthOutput{
+		TotalNodes:   total,
+		OnlineNodes:  online,
+		OfflineNodes: total - online,
+		AverageLoad:  averageLoad,
+		HealthStatus: healthStatus,
+		Mode:         "local-fallback",
+	}, nil
+}
+
+// ============================================================================
+// SERVER SETUP
+// ============================================================================
+
+func NewOmninodeServer() *OmninodeServer {
+	s := &OmninodeServer{
+		gateway:    NewGatewayClientFromEnv(),
+		nodeStatus: make(map[string]NodeStatus),
+	}
+
+	s.mcpServer = mcp.NewServer(&mcp.Implementation{
+		Name:    "omninode",
+		Version: "0.1.0",
+	}, nil)
+
+	s.registerTools()
+	return s
+}
+
+func (s *OmninodeServer) registerTools() {
+	mcp.AddTool(s.mcpServer, &mcp.Tool{
+		Name:        "run_sandbox_code",
+		Description: "Execute code in a sandboxed environment (Python, JavaScript, or Bash). Returns stdout, stderr, and exit code.",
+	}, s.handleRunSandboxCode)
+
+	mcp.AddTool(s.mcpServer, &mcp.Tool{
+		Name:        "list_nodes",
+		Description: "List all connected Omninode nodes with their status",
+	}, s.handleListNodes)
+
+	mcp.AddTool(s.mcpServer, &mcp.Tool{
+		Name:        "get_node_status",
+		Description: "Get status of a specific node",
+	}, s.handleGetNodeStatus)
+
+	mcp.AddTool(s.mcpServer, &mcp.Tool{
+		Name:        "dispatch_task",
+		Description: "Dispatch a computation task to an online node",
+	}, s.handleDispatchTask)
+
+	mcp.AddTool(s.mcpServer, &mcp.Tool{
+		Name:        "get_fabric_health",
+		Description: "Get overall health status of the Omninode fabric",
+	}, s.handleGetFabricHealth)
 }
 
 func (s *OmninodeServer) StartMCPStdio() error {
@@ -190,6 +284,10 @@ func (s *OmninodeServer) StartMCPStdio() error {
 	_, err := s.mcpServer.Connect(ctx, &mcp.StdioTransport{}, nil)
 	return err
 }
+
+// ============================================================================
+// NODE STATUS HELPERS
+// ============================================================================
 
 func (s *OmninodeServer) UpdateNodeStatus(nodeID string, status NodeStatus) {
 	s.statusMutex.Lock()
@@ -204,4 +302,20 @@ func (s *OmninodeServer) GetNodeStatus(nodeID string) (NodeStatus, bool) {
 	defer s.statusMutex.RUnlock()
 	status, exists := s.nodeStatus[nodeID]
 	return status, exists
+}
+
+// ============================================================================
+// UTILITY FUNCTIONS
+// ============================================================================
+
+func toolResult(value any) (*mcp.CallToolResult, error) {
+	data, err := json.MarshalIndent(value, "", "  ")
+	if err != nil {
+		return nil, err
+	}
+	return &mcp.CallToolResult{
+		Content: []mcp.Content{
+			&mcp.TextContent{Text: string(data)},
+		},
+	}, nil
 }

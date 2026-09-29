@@ -1,107 +1,119 @@
 # OmniClient
 
-Desktop application for Omninode fabric, built with Go and Wails.
+OmniClient è il worker headless del fabric Omninode, scritto in Go. Fornisce:
+- Esecuzione di task computazionali su nodi remoti
+- Integrazione MCP (Model Context Protocol) per agenti IA
+- Heartbeat MQTT periodico verso il Gateway FastAPI
+- Dashboard web "Bento Box" servita dal Gateway sulla porta 8000
 
 ## Prerequisites
 
 - Go 1.21+
-- Node.js 18+
-- Wails CLI (`go install github.com/wailsapp/wails/v2/cmd/wails@latest`)
-
-## Development
-
-```bash
-wails dev
-```
+- Broker MQTT (es. Mosquitto) sulla porta 1883
+- Gateway FastAPI in esecuzione su `http://127.0.0.1:8000`
 
 ## Build
 
 ```bash
-wails build
+cd omniclient
+go build -o omniclient.exe .
 ```
 
-## Architecture
+Il binario risultante è un'applicazione CLI headless, senza dipendenze grafiche.
 
-OmniClient connects to the Omninode fabric via MCP (Model Context Protocol) and provides:
-- Local agent orchestration
-- Zero-touch updates via GitHub Actions
-- Distributed computation coordination
+## Utilizzo
 
-## MCP Server
+### Modalità MCP Stdio (per agenti IA)
 
-OmniClient includes a built-in MCP server that exposes 4 tools to external AI agents:
-
-| Tool | Description |
-|------|-------------|
-| `list_nodes` | List all connected nodes with status |
-| `get_node_status` | Get detailed status of a specific node |
-| `dispatch_task` | Dispatch computation task to a node |
-| `get_fabric_health` | Get overall fabric health metrics |
-
-### Running MCP Server
-
-**GUI Mode (default):**
-```bash
-wails dev
-# MCP SSE server runs on :8080
-```
-
-**Stdio Mode (for agent integration):**
 ```bash
 ./omniclient --mcp-stdio
-# MCP server runs on stdin/stdout
 ```
 
-## Testing MCP
+Il server MCP comunica via stdin/stdout con agenti come Gemini Desktop, Claude Desktop, o Cursor IDE.
 
-### Python Test Client
+### Modalità Worker con Heartbeat MQTT
+
+Il worker si connette al broker MQTT e invia heartbeat periodici al topic:
+```
+omninode/nodes/{node-id}/heartbeat
+```
+
+Il Gateway FastAPI ascolta questi heartbeat e aggiorna la dashboard Bento Box in tempo reale.
+
+## Architettura
+
+```
+┌──────────────┐      MQTT       ┌─────────────────┐
+│  OmniClient  │ ───────────────>│  Gateway FastAPI│
+│  (headless)  │   heartbeat     │  (porta 8000)   │
+└──────────────┘                 └────────┬────────┘
+                                          │
+                                          │ HTTP
+                                          ▼
+                                   ┌──────────────┐
+                                   │ Dashboard    │
+                                   │ Bento Box    │
+                                   │ (web UI)     │
+                                   └──────────────┘
+```
+
+### Componenti
+
+| Componente | Descrizione |
+|------------|-------------|
+| `main.go` | Entry point CLI, gestisce `--mcp-stdio` e worker mode |
+| `mcp_server.go` | Server MCP con tools: `restart_node`, `run_sandbox_code`, `browse_webpage`, `workspace.write` |
+| `gateway_client.go` | Client HTTP verso il Gateway FastAPI |
+| Gateway FastAPI | Serve la dashboard Bento Box e gestisce i task MQTT |
+
+## Dashboard Bento Box
+
+La dashboard è accessibile su `http://localhost:8000` e mostra:
+- Stato dei nodi connessi (online/offline)
+- Chat per inviare comandi in linguaggio naturale
+- Lista dei nodi attivi con load %
+
+### Endpoint API
+
+| Endpoint | Descrizione |
+|----------|-------------|
+| `GET /` | Dashboard web (Bento Box) |
+| `GET /health` | Health check del Gateway |
+| `GET /api/v1/nodes` | Lista nodi attivi (richiede header `x-omninode-key`) |
+
+## Testing
+
+### Test del server MCP
 
 ```bash
-# Install dependencies
-pip install requests
+# Stdio mode
+./omniclient --mcp-stdio
 
-# Run tests (stdio mode)
+# Test con client Python
 python test_mcp_client.py --stdio
-
-# Run tests (SSE mode, requires wails dev running)
-python test_mcp_client.py --sse
 ```
 
-### AI Agent Integration
+### Test della dashboard
 
-See [MCP_SETUP.md](MCP_SETUP.md) for configuration guides:
-- Gemini Desktop
-- Claude Desktop
-- Cursor IDE
-- Generic MCP clients
-
-### Example: Gemini Desktop
-
-1. Build OmniClient: `wails build`
-2. Add to Gemini MCP config:
-```json
-{
-  "mcpServers": {
-    "omninode": {
-      "command": "/path/to/omniclient",
-      "args": ["--mcp-stdio"]
-    }
-  }
-}
+1. Avvia il Gateway:
+```bash
+cd node1-gateway
+python main.py
 ```
-3. Ask Gemini: "Show me the Omninode fabric health"
+
+2. Apri `http://localhost:8000` nel browser.
+
+3. Verifica che i nodi appaiano nella sezione "Active Nodes".
 
 ## Project Structure
 
 ```
 omniclient/
-├── main.go              # Wails app + MCP integration
-├── mcp_server.go        # MCP server implementation
-├── go.mod               # Go module dependencies
-├── wails.json           # Wails configuration
-├── test_mcp_client.py   # Python test client
-├── MCP_SETUP.md         # Agent configuration guide
-└── README.md            # This file
+├── main.go              # Entry point CLI headless
+├── mcp_server.go        # Server MCP
+├── gateway_client.go    # Client HTTP verso Gateway
+├── go.mod               # Dipendenze Go
+└── README.md            # Questa documentazione
 ```
 
 ## License

@@ -1,5 +1,8 @@
 import logging
 import os
+import tempfile
+import json
+import time
 from contextlib import asynccontextmanager
 from typing import Any, Literal
 
@@ -7,7 +10,7 @@ from fastapi import FastAPI, Header, HTTPException, status
 from fastapi.concurrency import run_in_threadpool
 from pydantic import AnyHttpUrl, BaseModel, Field
 
-from mqtt_service import MQTTService, TaskPublishError, TaskRemoteError, TaskTimeoutError
+from mqtt_service import MQTTService, TaskPublishError, TaskRemoteError, TaskTimeoutError, NodeRecord
 
 from audit import AuditEventEngine
 from policy_engine import PolicyEngine
@@ -16,6 +19,7 @@ from test_executor import CommandExecutor
 from work_loop import AutonomousWorkLoop
 from browser_runtime import BiometricBrowserRuntime
 from playwright.async_api import async_playwright
+from local_executor import LocalWorkspaceExecutor
 
 logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"))
 logger = logging.getLogger(__name__)
@@ -25,9 +29,71 @@ if not API_KEY or API_KEY == "replace-with-a-long-random-secret":
     logger.warning("OMNINODE_API_KEY is not configured; protected endpoints will reject requests")
 
 mqtt_service = MQTTService()
-
 audit_engine = AuditEventEngine()
 policy_engine = PolicyEngine(audit_engine)
+
+# ==========================================
+# PHASE 1: LOOPBACK LOCAL VERTICAL SLICE
+# ==========================================
+
+# 1. Configurazione del Workspace Temporaneo isolato per Phase 1
+WORKSPACE_ROOT = os.getenv("OMNINODE_WORKSPACE_ROOT", os.path.join(tempfile.gettempdir(), "omninode_workspace"))
+os.makedirs(WORKSPACE_ROOT, exist_ok=True)
+logger.info(f"Registered local workspace 'temporary' at: {WORKSPACE_ROOT}")
+
+local_executor = LocalWorkspaceExecutor(roots={"temporary": WORKSPACE_ROOT})
+
+# 2. Handler per l'esecuzione sicura dei task locali via MQTT
+def handle_local_task(node_id: str, task_envelope: dict) -> None:
+    """Intercetta il task da MQTT, lo esegue localmente e pubblica il risultato correlato."""
+    if node_id != "node-local":
+        return
+        
+    task_id = task_envelope.get("task_id")
+    task_type = task_envelope.get("task_type")
+    payload = task_envelope.get("payload", {})
+    
+    logger.info(f"Node '{node_id}' received task '{task_type}' (ID: {task_id})")
+    
+    response = {"task_id": task_id, "status": "error", "error": "Unknown error"}
+
+    try:
+        # Supportiamo ESCLUSIVAMENTE workspace.write per questa fase
+        if task_type == "workspace.write":
+            result = local_executor.write(
+                workspace_id=payload.get("workspace_id", "temporary"),
+                relative_path=payload.get("path"),
+                content=payload.get("content")
+            )
+            response["status"] = "completed"
+            response["data"] = result
+            response["error"] = None
+        else:
+            response["error"] = f"Capability '{task_type}' denied or unsupported on local node."
+            
+    except PermissionError as pe:
+        response["error"] = f"Policy Denial: {str(pe)}"
+    except Exception as e:
+        response["error"] = f"Execution Error: {str(e)}"
+        
+    mqtt_service.client.publish(
+        f"omninode/nodes/{node_id}/results", 
+        json.dumps(response), 
+        qos=1
+    )
+
+mqtt_service.set_task_handler(handle_local_task)
+
+# 3. Registrazione FORZATA del nodo locale (evita errore 404 Node Not Found per i test loopback)
+# Impostiamo last_seen a 24h nel futuro per non farlo espellere mai
+mqtt_service.nodes["node-local"] = NodeRecord(
+    node_id="node-local",
+    status="online",
+    load=0,
+    last_seen=int(time.time()) + 86400,
+    metadata={"type": "local-executor"}
+)
+# ==========================================
 
 
 @asynccontextmanager
@@ -36,20 +102,16 @@ async def lifespan(_: FastAPI):
     yield
     mqtt_service.stop()
 
-
 app = FastAPI(title="Omninode Node1 Gateway", version="0.1.0", lifespan=lifespan)
-
 
 class TaskRequest(BaseModel):
     task_type: str = Field(min_length=1, max_length=128)
     payload: dict[str, Any] = Field(default_factory=dict)
 
-
 class BrowseRequest(BaseModel):
     url: AnyHttpUrl
     extract_content: Literal["markdown", "text", "html"] = "markdown"
     timeout_seconds: int = Field(default=30, ge=1, le=120)
-
 
 class BrowseResponse(BaseModel):
     title: str
@@ -59,7 +121,6 @@ class BrowseResponse(BaseModel):
     request_id: str
     status: Literal["completed"]
 
-
 class GoalRequest(BaseModel):
     objective: str = Field(..., description="Obiettivo operativo assegnato all'agente")
     workspace_id: str = Field(..., description="ID univoco del workspace isolato")
@@ -67,29 +128,24 @@ class GoalRequest(BaseModel):
     max_iterations: int = Field(default=3, ge=1, le=10)
     max_duration_seconds: int = Field(default=900, ge=10, le=3600)
 
-
 class AutonomousBrowseGoalRequest(BaseModel):
     url: AnyHttpUrl = Field(..., description="URL di destinazione per l'agente")
     action_type: Literal["extract", "click_and_type"] = "extract"
     target_selector: str | None = Field(default=None, description="Selettore CSS per interazioni mirate")
     input_text: str | None = Field(default=None, description="Testo da digitare eventualmente")
 
-
 def require_api_key(x_omninode_key: str | None = Header(default=None)) -> None:
     if not API_KEY or x_omninode_key != API_KEY:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid Omninode key")
-
 
 @app.get("/health")
 def health() -> dict[str, str]:
     return {"status": "ok", "service": "omninode-node1-gateway"}
 
-
 @app.get("/nodes")
 def list_nodes(x_omninode_key: str | None = Header(default=None)) -> list[dict[str, Any]]:
     require_api_key(x_omninode_key)
     return mqtt_service.get_nodes()
-
 
 @app.get("/nodes/{node_id}")
 def get_node(node_id: str, x_omninode_key: str | None = Header(default=None)) -> dict[str, Any]:
@@ -98,7 +154,6 @@ def get_node(node_id: str, x_omninode_key: str | None = Header(default=None)) ->
     if node is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="node not found")
     return node
-
 
 @app.post("/nodes/{node_id}/tasks", status_code=status.HTTP_202_ACCEPTED)
 def dispatch_task(node_id: str, request: TaskRequest, x_omninode_key: str | None = Header(default=None)) -> dict[str, Any]:
@@ -109,7 +164,6 @@ def dispatch_task(node_id: str, request: TaskRequest, x_omninode_key: str | None
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="node not found") from None
     except RuntimeError as exc:
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
-
 
 @app.post("/api/v1/browse", response_model=BrowseResponse)
 async def browse_webpage(request: BrowseRequest, x_omninode_key: str | None = Header(default=None)):
@@ -157,7 +211,6 @@ async def browse_webpage(request: BrowseRequest, x_omninode_key: str | None = He
         status="completed",
     )
 
-
 @app.post("/api/v1/goals")
 def run_autonomous_goal(goal: GoalRequest, x_omninode_key: str | None = Header(default=None)):
     require_api_key(x_omninode_key)
@@ -191,7 +244,6 @@ def run_autonomous_goal(goal: GoalRequest, x_omninode_key: str | None = Header(d
 
     result = loop.execute_goal(goal.dict())
     return result
-
 
 @app.post("/api/v1/autonomous-browse")
 async def run_autonomous_browse(goal: AutonomousBrowseGoalRequest, x_omninode_key: str | None = Header(default=None)):
@@ -231,7 +283,6 @@ async def run_autonomous_browse(goal: AutonomousBrowseGoalRequest, x_omninode_ke
 
     except Exception as exc:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Autonomous browse failed: {str(exc)}")
-
 
 @app.get("/fabric/health")
 def fabric_health(x_omninode_key: str | None = Header(default=None)) -> dict[str, Any]:

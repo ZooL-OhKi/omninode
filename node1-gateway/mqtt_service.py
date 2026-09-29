@@ -53,6 +53,7 @@ class MQTTService:
         self.nodes: dict[str, NodeRecord] = {}
         self.pending_tasks: dict[str, PendingTask] = {}
         self._lock = threading.RLock()
+        self.task_handler = None
         self.client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id="omninode-node1-gateway")
         self.client.reconnect_delay_set(min_delay=1, max_delay=30)
         self.client.on_connect = self._on_connect
@@ -63,6 +64,10 @@ class MQTTService:
             self.client.username_pw_set(self.username, self.password)
         if self.tls_enabled:
             self.client.tls_set()
+
+    def set_task_handler(self, handler):
+        """Registra la callback per i task in ingresso."""
+        self.task_handler = handler
 
     def start(self) -> None:
         """Connect asynchronously so application startup does not block."""
@@ -82,6 +87,7 @@ class MQTTService:
         client.subscribe("omninode/nodes/+/heartbeat", qos=1)
         client.subscribe("omninode/nodes/+/status", qos=1)
         client.subscribe("omninode/nodes/+/results", qos=1)
+        client.subscribe("omninode/nodes/node-local/tasks", qos=1)
         logger.info("MQTT connected and subscribed to node topics")
 
     def _on_disconnect(self, client: mqtt.Client, userdata: Any, disconnect_flags: Any, reason_code: Any, properties: Any = None) -> None:
@@ -99,6 +105,14 @@ class MQTTService:
             logger.warning("Discarding invalid JSON from %s", message.topic)
             return
 
+        if event == "tasks":
+            if self.task_handler:
+                try:
+                    self.task_handler(node_id, payload)
+                except Exception as e:
+                    logger.error(f"Task handler error for {node_id}: {e}")
+            return
+
         if event in {"heartbeat", "status"}:
             self.update_node(node_id, payload)
         elif event == "results":
@@ -111,18 +125,18 @@ class MQTTService:
             with self._lock:
                 pending = self.pending_tasks.get(task_id)
 
-            if pending:
-                if status == "completed":
-                    pending.result = payload
-                elif status == "error":
-                    err_info = payload.get("error")
-                    if isinstance(err_info, dict):
-                        pending.error = err_info.get("message", "unknown remote error")
-                    else:
-                        pending.error = str(err_info or "unknown remote error")
-                pending.event.set()
-            else:
-                logger.info("Task result received from node %s for unknown task_id %s", node_id, task_id)
+                if pending:
+                    if status == "completed":
+                        pending.result = payload
+                    elif status == "error":
+                        err_info = payload.get("error")
+                        if isinstance(err_info, dict):
+                            pending.error = err_info.get("message", "unknown remote error")
+                        else:
+                            pending.error = str(err_info or "unknown remote error")
+                    pending.event.set()
+                else:
+                    logger.info("Task result received from node %s for unknown task_id %s", node_id, task_id)
 
     def update_node(self, node_id: str, payload: dict[str, Any]) -> None:
         status = str(payload.get("status", "online"))

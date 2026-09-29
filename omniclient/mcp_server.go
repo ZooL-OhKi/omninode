@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -36,7 +37,11 @@ func NewOmninodeServer() *OmninodeServer {
 		Version: "v1.0.0",
 	}, nil)
 
-	baseGateway := NewHTTPGateway("https://api.omninode.local/v1")
+	baseGateway := NewHTTPGateway("http://127.0.0.1:8000")
+	// Configura API key dalle variabili d'ambiente se disponibile
+	// In produzione, usare os.Getenv("OMNINODE_API_KEY")
+	baseGateway.SetAPIKey("")
+
 	extendedGateway := &gatewayWrapper{HTTPGateway: baseGateway}
 
 	s := &OmninodeServer{
@@ -70,6 +75,11 @@ func (s *OmninodeServer) registerTools() {
 		Name:        "browse_webpage",
 		Description: "Visita una pagina web e ne estrae il contenuto.",
 	}, s.handleBrowseWebpage)
+
+	mcp.AddTool(s.mcpServer, &mcp.Tool{
+		Name:        "workspace.write",
+		Description: "Scrive un file in un workspace autorizzato tramite il gateway Omninode. Supporta polling asincrono per task di lunga durata.",
+	}, s.handleWorkspaceWrite)
 }
 
 type RestartNodeInput struct {
@@ -141,4 +151,118 @@ func (s *OmninodeServer) handleBrowseWebpage(ctx context.Context, req *mcp.CallT
 		return nil, BrowseWebpageOutput{}, err
 	}
 	return nil, BrowseWebpageOutput{Title: res.Title, Content: res.Content, NodeID: res.NodeID}, nil
+}
+
+// WorkspaceWriteInput definisce l'input per il tool workspace.write
+type WorkspaceWriteInput struct {
+	WorkspaceID  string `json:"workspace_id" jsonschema:"ID del workspace autorizzato (es: 'temporary')"`
+	Path         string `json:"path" jsonschema:"Percorso relativo del file all'interno del workspace"`
+	Content      string `json:"content" jsonschema:"Contenuto del file da scrivere"`
+}
+
+// WorkspaceWriteOutput definisce l'output del tool workspace.write
+type WorkspaceWriteOutput struct {
+	Status       string `json:"status"`
+	TaskID       string `json:"task_id,omitempty"`
+	Path         string `json:"path,omitempty"`
+	BytesWritten int64  `json:"bytes_written,omitempty"`
+	Error        string `json:"error,omitempty"`
+}
+
+// handleWorkspaceWrite gestisce il tool workspace.write con polling asincrono
+func (s *OmninodeServer) handleWorkspaceWrite(ctx context.Context, req *mcp.CallToolRequest, input WorkspaceWriteInput) (*mcp.CallToolResult, WorkspaceWriteOutput, error) {
+	if input.WorkspaceID == "" {
+		return nil, WorkspaceWriteOutput{}, fmt.Errorf("workspace_id è obbligatorio")
+	}
+	if input.Path == "" {
+		return nil, WorkspaceWriteOutput{}, fmt.Errorf("path è obbligatorio")
+	}
+	if input.Content == "" {
+		return nil, WorkspaceWriteOutput{}, fmt.Errorf("content è obbligatorio")
+	}
+
+	// Prepara il payload per il gateway
+	payload := map[string]any{
+		"workspace_id": input.WorkspaceID,
+		"path":         input.Path,
+		"content":      input.Content,
+	}
+
+	// Invia il task al gateway (node-local per il workspace temporaneo locale)
+	dispatchRes, err := s.gateway.DispatchTask(ctx, "node-local", "workspace.write", payload)
+	if err != nil {
+		return nil, WorkspaceWriteOutput{}, fmt.Errorf("dispatch fallito: %w", err)
+	}
+
+	// Il gateway risponde con 202 Accepted e task_id
+	// Eseguiamo polling limitato per attendere il completamento
+	taskID := dispatchRes.TaskID
+	maxAttempts := 30
+	attemptDelay := 500 * time.Millisecond
+
+	for i := 0; i < maxAttempts; i++ {
+		// Verifica se il context è stato cancellato
+		select {
+		case <-ctx.Done():
+			return nil, WorkspaceWriteOutput{}, ctx.Err()
+		default:
+		}
+
+		// Interroga lo stato del task
+		taskStatus, err := s.gateway.GetTaskStatus(ctx, taskID)
+		if err != nil {
+			// Se il task non è ancora nel DB, aspetta e riprova
+			time.Sleep(attemptDelay)
+			continue
+		}
+
+		// Controlla lo stato del task
+		switch taskStatus.Status {
+		case "completed":
+			// Estrai il risultato dal campo result
+			resultData, ok := taskStatus.Result.(map[string]any)
+			if !ok {
+				return nil, WorkspaceWriteOutput{
+					Status: "completed",
+					TaskID: taskID,
+				}, nil
+			}
+
+			bytesWritten := int64(0)
+			if bw, ok := resultData["bytes_written"].(float64); ok {
+				bytesWritten = int64(bw)
+			}
+
+			return nil, WorkspaceWriteOutput{
+				Status:       "completed",
+				TaskID:       taskID,
+				Path:         input.Path,
+				BytesWritten: bytesWritten,
+			}, nil
+
+		case "error":
+			return nil, WorkspaceWriteOutput{
+				Status: "error",
+				TaskID: taskID,
+				Error:  taskStatus.Error,
+			}, fmt.Errorf("task fallito: %s", taskStatus.Error)
+
+		case "dispatched", "queued", "running":
+			// Task ancora in esecuzione, aspetta e riprova
+			time.Sleep(attemptDelay)
+			continue
+
+		default:
+			// Stato sconosciuto, aspetta e riprova
+			time.Sleep(attemptDelay)
+			continue
+		}
+	}
+
+	// Timeout: polling esaurito senza risultato
+	return nil, WorkspaceWriteOutput{
+		Status: "timeout",
+		TaskID: taskID,
+		Error:  "polling timeout: task non completato entro il limite",
+	}, fmt.Errorf("polling timeout dopo %d tentativi", maxAttempts)
 }

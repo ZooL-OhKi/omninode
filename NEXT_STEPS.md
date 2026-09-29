@@ -1,5 +1,20 @@
 # Omninode Next Steps Execution Plan
 
+## Status
+
+| Phase | Name | Status |
+|-------|------|--------|
+| Phase 1 | Real local vertical slice | **complete** ✅ |
+| Phase 2 | Reliable task lifecycle | **next** (in progress) |
+| Phase 3 | Secure network fabric | pending |
+| Phase 4 | Multi-node orchestration | pending |
+| Phase 5 | MCP productization | pending |
+| Phase 6 | Browser capability | pending |
+| Phase 7 | Oracle deployment and CI/CD | pending |
+| Phase 8 | Operator experience | pending |
+
+**Current focus:** Phase 2 — Reliable task lifecycle
+
 ## Purpose
 
 This document turns the project handover into an ordered execution plan. It is intentionally concrete: every phase has prerequisites, atomic tasks, acceptance criteria, stop conditions, risks, and a definition of done.
@@ -28,6 +43,8 @@ Previously verified:
 
 These results validate code quality checks, not the complete distributed runtime. The highest-priority gap is the real MQTT path.
 
+**Update (Phase 1 complete):** The real MQTT path has been validated end-to-end. See `PROJECT_HANDOVER.md` for evidence of the successful Phase 1 test.
+
 ## Operating principles
 
 1. Implement one real vertical slice before expanding capabilities.
@@ -39,9 +56,13 @@ These results validate code quality checks, not the complete distributed runtime
 7. Update handover documentation after each meaningful milestone.
 8. Never claim completion from mocks or unit tests alone.
 
-## Phase 1 — Real local vertical slice
+## Phase 1 — Real local vertical slice ✅ COMPLETE
 
-### Objective
+### Status
+
+**COMPLETE** — This phase has been validated end-to-end. See `PROJECT_HANDOVER.md` for detailed evidence.
+
+### Objective (achieved)
 
 Prove this exact path with one local node and one temporary workspace:
 
@@ -57,7 +78,7 @@ MCP or HTTP
   -> correlated gateway/MCP result
 ```
 
-### Prerequisites
+### Prerequisites (met)
 
 - local checkout is synchronized;
 - broker is available on loopback;
@@ -66,7 +87,7 @@ MCP or HTTP
 - no uncommitted changes are being overwritten;
 - workspace root is explicitly registered.
 
-### Atomic tasks
+### Atomic tasks (completed)
 
 1. Trace the current gateway route that creates or dispatches a goal.
 2. Trace the current `mqtt_service.py` publish and pending-response interfaces.
@@ -81,27 +102,27 @@ MCP or HTTP
 11. Run one task against a temporary workspace.
 12. Record the exact result in `PROJECT_HANDOVER.md`.
 
-### Acceptance criteria
+### Acceptance criteria (met)
 
-- a real file is created;
-- the path is relative to a registered workspace;
-- the response contains actual byte count and path;
-- invalid node and capability are rejected;
-- expired task is not executed;
-- traversal and absolute paths are rejected;
-- duplicate delivery does not create uncontrolled side effects;
-- no arbitrary shell command is involved;
-- the broker is not reachable from the public network.
+- [x] a real file is created;
+- [x] the path is relative to a registered workspace;
+- [x] the response contains actual byte count and path;
+- [x] invalid node and capability are rejected;
+- [x] expired task is not executed;
+- [x] traversal and absolute paths are rejected;
+- [x] duplicate delivery does not create uncontrolled side effects;
+- [x] no arbitrary shell command is involved;
+- [x] the broker is not reachable from the public network.
 
-### Stop conditions
+### Stop conditions (not triggered)
 
 Stop before editing if the current topic contract is unclear, if multiple incompatible MQTT clients exist, if credentials are required but unavailable, or if the only way to proceed is to grant unrestricted filesystem access.
 
-### Definition of done
+### Definition of done (achieved)
 
 A real MCP or HTTP invocation creates one file in an authorized temporary workspace and returns the actual correlated result. A second invocation with the same task ID is deterministic.
 
-## Phase 2 — Reliable task lifecycle
+## Phase 2 — Reliable task lifecycle 🔄 NEXT (IN PROGRESS)
 
 ### Objective
 
@@ -154,7 +175,7 @@ Move from loopback-only operation to authenticated node-to-node operation.
 
 ### Acceptance criteria
 
-- a node cannot subscribe to another node’s task topic;
+- a node cannot subscribe to another node's task topic;
 - gateway can publish tasks but cannot impersonate a local executor outside policy;
 - credentials are absent from Git;
 - TLS verification fails closed;

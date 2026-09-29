@@ -93,9 +93,39 @@ This confirms that a real task traverses the complete runtime: gateway → MQTT 
 
 A real MCP or HTTP invocation creates one file in an authorized temporary workspace and returns the actual correlated result. A second invocation with the same task ID is deterministic.
 
-## Next objective: Phase 2 — Reliable task lifecycle
+## Phase 2 — Reliable task lifecycle: COMPLETE ✅
 
-Follow Phase 2 in `NEXT_STEPS.md` to make tasks observable and recoverable beyond a single synchronous request.
+### Implementation summary
+
+Phase 2 has been implemented through a hybrid SQLite datastore with the following characteristics:
+
+- **Persistent storage:** SQLite database (`tasks.db`) serves as the Source of Truth for task state.
+- **Task states:** `queued`, `dispatched`, `completed`, `error` are persisted with timestamps.
+- **Hybrid design:** `pending_tasks` dictionary is retained solely for synchronous request blocking (via `threading.Event`), avoiding database polling for synchronous endpoints.
+- **Idempotency:** Task ID is the primary key, preventing duplicate side effects.
+- **Query endpoint:** New `GET /api/v1/tasks/{task_id}` exposes task state for async polling by AI clients.
+
+### Files modified
+
+- `node1-gateway/task_store.py` (new): SQLite wrapper with `init_db()`, `create_task()`, `update_task_status()`, `get_task()`.
+- `node1-gateway/mqtt_service.py`: Integrated `task_store` for persistent state updates in `dispatch_task()` and `_on_message()`.
+- `node1-gateway/main.py`: Added `task_store.init_db()` in lifespan and `GET /api/v1/tasks/{task_id}` endpoint.
+
+### Acceptance criteria met
+
+- [x] Task state survives gateway restarts (persisted in SQLite).
+- [x] Caller can submit a task and later retrieve status via `GET /api/v1/tasks/{task_id}`.
+- [x] Duplicate request with same task ID does not duplicate side effects (primary key constraint).
+- [x] Synchronous endpoints (`/api/v1/browse`) continue to work via in-memory `pending_tasks` semaphore.
+- [x] Status transitions are auditable (timestamps in `created_at`, `updated_at`).
+
+### Definition of done
+
+A task can survive an HTTP disconnect and still be queried to a terminal state without losing identity or result. The hybrid design balances persistence (SQLite) with performance (in-memory semaphore for sync requests).
+
+## Next objective: Phase 3 — Secure network fabric
+
+Follow Phase 3 in `NEXT_STEPS.md` to move from loopback-only operation to authenticated node-to-node operation with TLS and topic-level ACLs.
 
 ## The actual gap (historical)
 

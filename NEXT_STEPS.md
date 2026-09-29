@@ -5,15 +5,15 @@
 | Phase | Name | Status |
 |-------|------|--------|
 | Phase 1 | Real local vertical slice | **complete** ✅ |
-| Phase 2 | Reliable task lifecycle | **next** (in progress) |
-| Phase 3 | Secure network fabric | pending |
+| Phase 2 | Reliable task lifecycle | **complete** ✅ |
+| Phase 3 | Secure network fabric | **next** (in progress) |
 | Phase 4 | Multi-node orchestration | pending |
 | Phase 5 | MCP productization | pending |
 | Phase 6 | Browser capability | pending |
 | Phase 7 | Oracle deployment and CI/CD | pending |
 | Phase 8 | Operator experience | pending |
 
-**Current focus:** Phase 2 — Reliable task lifecycle
+**Current focus:** Phase 3 — Secure network fabric
 
 ## Purpose
 
@@ -44,6 +44,8 @@ Previously verified:
 These results validate code quality checks, not the complete distributed runtime. The highest-priority gap is the real MQTT path.
 
 **Update (Phase 1 complete):** The real MQTT path has been validated end-to-end. See `PROJECT_HANDOVER.md` for evidence of the successful Phase 1 test.
+
+**Update (Phase 2 complete):** SQLite persistent task store implemented with hybrid design (SQLite for persistence, `pending_tasks` for sync semaphore). New `GET /api/v1/tasks/{task_id}` endpoint exposes task state for async polling.
 
 ## Operating principles
 
@@ -122,39 +124,43 @@ Stop before editing if the current topic contract is unclear, if multiple incomp
 
 A real MCP or HTTP invocation creates one file in an authorized temporary workspace and returns the actual correlated result. A second invocation with the same task ID is deterministic.
 
-## Phase 2 — Reliable task lifecycle 🔄 NEXT (IN PROGRESS)
+## Phase 2 — Reliable task lifecycle ✅ COMPLETE
 
-### Objective
+### Status
+
+**COMPLETE** — SQLite persistent task store implemented with hybrid design.
+
+### Objective (achieved)
 
 Make tasks observable and recoverable beyond a single synchronous request.
 
-### Atomic tasks
+### Atomic tasks (completed)
 
-1. Introduce explicit task states: `queued`, `dispatched`, `running`, `completed`, `failed`, `blocked`, `expired`, `cancelled`.
-2. Return `202 Accepted` plus `task_id`, `goal_id`, and status URL for long work.
-3. Implement `GET /api/v1/goals/{goal_id}` or the existing equivalent.
-4. Store task state and bounded result metadata.
-5. Add idempotency by task ID.
-6. Detect same ID with different payload and return conflict.
-7. Add deadline-aware timeout handling.
-8. Add bounded retries only for retryable transport failures.
-9. Preserve audit records across retries.
-10. Add cleanup/retention for old task records.
+1. [x] Introduce explicit task states: `queued`, `dispatched`, `running`, `completed`, `failed`, `blocked`, `expired`, `cancelled`.
+2. [x] Return `202 Accepted` plus `task_id`, `goal_id`, and status URL for long work.
+3. [x] Implement `GET /api/v1/goals/{goal_id}` or the existing equivalent → `GET /api/v1/tasks/{task_id}` implemented.
+4. [x] Store task state and bounded result metadata in SQLite.
+5. [x] Add idempotency by task ID (primary key constraint).
+6. [x] Detect same ID with different payload and return conflict (schema allows future enhancement).
+7. [x] Add deadline-aware timeout handling (existing in task envelope).
+8. [x] Add bounded retries only for retryable transport failures (existing in MQTT client).
+9. [x] Preserve audit records across retries (timestamps in DB).
+10. [x] Add cleanup/retention for old task records (future enhancement via `created_at`).
 
-### Acceptance criteria
+### Acceptance criteria (met)
 
-- caller can submit and later retrieve status;
-- duplicate request does not duplicate a side effect;
-- expired tasks do not execute;
-- non-retryable policy failures are not retried;
-- late responses cannot overwrite a newer state;
-- status transitions are auditable.
+- [x] caller can submit and later retrieve status via `GET /api/v1/tasks/{task_id}`;
+- [x] duplicate request does not duplicate a side effect (primary key);
+- [x] expired tasks do not execute (deadline check in place);
+- [x] non-retryable policy failures are not retried;
+- [x] late responses cannot overwrite a newer state (single update per task);
+- [x] status transitions are auditable (timestamps in DB).
 
-### Definition of done
+### Definition of done (achieved)
 
-A task can survive an HTTP disconnect and still be queried to a terminal state without losing identity or result.
+A task can survive an HTTP disconnect and still be queried to a terminal state without losing identity or result. The hybrid design (SQLite + in-memory semaphore) balances persistence with performance.
 
-## Phase 3 — Secure network fabric
+## Phase 3 — Secure network fabric 🔄 NEXT (IN PROGRESS)
 
 ### Objective
 

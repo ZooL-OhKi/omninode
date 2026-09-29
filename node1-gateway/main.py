@@ -166,6 +166,29 @@ def dispatch_task(node_id: str, request: TaskRequest, x_omninode_key: str | None
     except RuntimeError as exc:
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
 
+@app.get("/api/v1/tasks/{task_id}")
+def get_task_status(task_id: str, x_omninode_key: str | None = Header(default=None)) -> dict[str, Any]:
+    require_api_key(x_omninode_key)
+    
+    task_record = task_store.get_task(task_id)
+    if not task_record:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found")
+        
+    # Ripristiniamo i JSON salvati come stringhe in dizionari Python per la formattazione della risposta API
+    if task_record.get("payload") and isinstance(task_record["payload"], str):
+        try:
+            task_record["payload"] = json.loads(task_record["payload"])
+        except json.JSONDecodeError:
+            pass
+            
+    if task_record.get("result") and isinstance(task_record["result"], str):
+        try:
+            task_record["result"] = json.loads(task_record["result"])
+        except json.JSONDecodeError:
+            pass
+
+    return task_record
+
 @app.post("/api/v1/browse", response_model=BrowseResponse)
 async def browse_webpage(request: BrowseRequest, x_omninode_key: str | None = Header(default=None)):
     require_api_key(x_omninode_key)

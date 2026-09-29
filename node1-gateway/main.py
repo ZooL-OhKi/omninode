@@ -7,7 +7,6 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 
 from mqtt_service import MQTTService
-from work_loop import work_loop
 
 # --- Configuration ---
 OMNINODE_API_KEY = os.environ.get("OMNINODE_API_KEY", "omninode-super-secure-key-2026")

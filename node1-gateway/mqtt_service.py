@@ -8,27 +8,24 @@ from typing import Any
 
 import paho.mqtt.client as mqtt
 
-logger = logging.getLogger(__name__)
+import task_store
 
+logger = logging.getLogger(__name__)
 
 class TaskTimeoutError(Exception):
     pass
 
-
 class TaskRemoteError(Exception):
     pass
 
-
 class TaskPublishError(Exception):
     pass
-
 
 @dataclass
 class PendingTask:
     event: threading.Event = field(default_factory=threading.Event)
     result: dict[str, Any] | None = None
     error: str | None = None
-
 
 @dataclass
 class NodeRecord:
@@ -37,7 +34,6 @@ class NodeRecord:
     load: int
     last_seen: int
     metadata: dict[str, Any]
-
 
 class MQTTService:
     """Thread-safe MQTT bridge between distributed nodes and the HTTP gateway."""
@@ -111,7 +107,7 @@ class MQTTService:
                     self.task_handler(node_id, payload)
                 except Exception as e:
                     logger.error(f"Task handler error for {node_id}: {e}")
-            return
+                return
 
         if event in {"heartbeat", "status"}:
             self.update_node(node_id, payload)
@@ -122,21 +118,26 @@ class MQTTService:
                 logger.warning("Discarding result payload missing task_id or status from %s", node_id)
                 return
 
+            # 1. Aggiornamento dello stato persistente nel database (Source of Truth)
+            error_msg = None
+            if status == "completed":
+                task_store.update_task_status(task_id, "completed", result=payload)
+            elif status == "error":
+                err_info = payload.get("error")
+                error_msg = err_info.get("message", "unknown remote error") if isinstance(err_info, dict) else str(err_info or "unknown remote error")
+                task_store.update_task_status(task_id, "error", error=error_msg)
+            else:
+                task_store.update_task_status(task_id, status)
+
+            # 2. Risoluzione dell'attesa sincrona in memoria (per dispatch_task_sync)
             with self._lock:
                 pending = self.pending_tasks.get(task_id)
-
                 if pending:
                     if status == "completed":
                         pending.result = payload
                     elif status == "error":
-                        err_info = payload.get("error")
-                        if isinstance(err_info, dict):
-                            pending.error = err_info.get("message", "unknown remote error")
-                        else:
-                            pending.error = str(err_info or "unknown remote error")
+                        pending.error = error_msg
                     pending.event.set()
-                else:
-                    logger.info("Task result received from node %s for unknown task_id %s", node_id, task_id)
 
     def update_node(self, node_id: str, payload: dict[str, Any]) -> None:
         status = str(payload.get("status", "online"))
@@ -178,19 +179,27 @@ class MQTTService:
             raise RuntimeError(f"node {node_id} is offline")
 
         task_id = f"task-{int(time.time() * 1000)}"
+        
+        # Salvataggio persistente in stato queued
+        task_store.create_task(task_id, task_type, payload)
+
         envelope = {
             "task_id": task_id,
             "task_type": task_type,
             "payload": payload,
             "submitted_at": int(time.time()),
         }
+        
         info = self.client.publish(
             f"omninode/nodes/{node_id}/tasks",
             json.dumps(envelope, separators=(",", ":")),
             qos=1,
         )
         if info.rc != mqtt.MQTT_ERR_SUCCESS:
+            task_store.update_task_status(task_id, "error", error="unable to publish task to MQTT broker")
             raise RuntimeError("unable to publish task to MQTT broker")
+            
+        task_store.update_task_status(task_id, "dispatched")
         return {"status": "dispatched", "node_id": node_id, **envelope}
 
     def dispatch_task_sync(self, node_id: str, task_type: str, payload: dict[str, Any], timeout: float) -> dict[str, Any]:

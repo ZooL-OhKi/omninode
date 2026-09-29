@@ -11,6 +11,7 @@ from fastapi.concurrency import run_in_threadpool
 from pydantic import AnyHttpUrl, BaseModel, Field
 
 from mqtt_service import MQTTService, TaskPublishError, TaskRemoteError, TaskTimeoutError, NodeRecord
+import task_store
 
 from audit import AuditEventEngine
 from policy_engine import PolicyEngine
@@ -48,13 +49,13 @@ def handle_local_task(node_id: str, task_envelope: dict) -> None:
     """Intercetta il task da MQTT, lo esegue localmente e pubblica il risultato correlato."""
     if node_id != "node-local":
         return
-        
+
     task_id = task_envelope.get("task_id")
     task_type = task_envelope.get("task_type")
     payload = task_envelope.get("payload", {})
-    
+
     logger.info(f"Node '{node_id}' received task '{task_type}' (ID: {task_id})")
-    
+
     response = {"task_id": task_id, "status": "error", "error": "Unknown error"}
 
     try:
@@ -70,12 +71,12 @@ def handle_local_task(node_id: str, task_envelope: dict) -> None:
             response["error"] = None
         else:
             response["error"] = f"Capability '{task_type}' denied or unsupported on local node."
-            
+
     except PermissionError as pe:
         response["error"] = f"Policy Denial: {str(pe)}"
     except Exception as e:
         response["error"] = f"Execution Error: {str(e)}"
-        
+
     mqtt_service.client.publish(
         f"omninode/nodes/{node_id}/results", 
         json.dumps(response), 
@@ -93,11 +94,11 @@ mqtt_service.nodes["node-local"] = NodeRecord(
     last_seen=int(time.time()) + 86400,
     metadata={"type": "local-executor"}
 )
-# ==========================================
 
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
+    task_store.init_db()  # Inizializzazione DB SQLite per Phase 2
     mqtt_service.start()
     yield
     mqtt_service.stop()

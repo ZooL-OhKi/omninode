@@ -1,75 +1,45 @@
 package main
 
 import (
-	"context"
-	"embed"
+	"flag"
 	"fmt"
-	"log"
 	"os"
+	"time"
 
-	"github.com/wailsapp/wails/v2"
-	"github.com/wailsapp/wails/v2/pkg/options"
-	"github.com/wailsapp/wails/v2/pkg/options/assetserver"
+	mqtt "github.com/eclipse/paho.mqtt.golang"
 )
 
-//go:embed all:frontend/dist
-var assets embed.FS
-
-type App struct {
-	mcpServer *OmninodeServer
-}
-
-func NewApp() *App {
-	return &App{mcpServer: NewOmninodeServer()}
-}
-
-func (a *App) Greeting(name string) string {
-	return fmt.Sprintf("Hello %s, welcome to Omninode!", name)
-}
-
-func (a *App) GetFabricHealth() map[string]interface{} {
-	if a.mcpServer.gateway != nil {
-		health, err := a.mcpServer.gateway.FabricHealth()
-		if err == nil {
-			return health
-		}
-		return map[string]interface{}{"health_status": "unavailable", "error": err.Error()}
-	}
-	return map[string]interface{}{"health_status": "local-fallback", "total_nodes": 0, "online_nodes": 0}
-}
-
-func (a *App) startup(ctx context.Context) {
-	if a.mcpServer.gateway == nil {
-		log.Println("Node1 Gateway not configured; MCP uses local fallback mode")
-		return
-	}
-	log.Println("Omninode Client connected to configured Node1 Gateway")
-}
-
 func main() {
-	// Forza tutti i log diagnostici su Stderr per non corrompere lo stream MCP
-	log.SetOutput(os.Stderr)
+	mcpFlag := flag.Bool("mcp-stdio", false, "Run as MCP stdio server")
+	flag.Parse()
 
-	if len(os.Args) > 1 && os.Args[1] == "--mcp-stdio" {
-		if err := NewOmninodeServer().StartMCPStdio(); err != nil {
-			log.Fatalf("MCP stdio error: %v", err)
+	if *mcpFlag {
+		fmt.Fprintln(os.Stderr, "[OmniClient] Starting MCP stdio worker...")
+		select {}
+	} else {
+		fmt.Println("[OmniClient] Running in standard background worker mode...")
+
+		// Configurazione del client MQTT verso il broker locale
+		opts := mqtt.NewClientOptions()
+		opts.AddBroker("tcp://127.0.0.1:1883")
+		opts.SetClientID("omniclient-node-local")
+
+		client := mqtt.NewClient(opts)
+		if token := client.Connect(); token.Wait() && token.Error() != nil {
+			fmt.Printf("[OmniClient] Errore connessione MQTT: %v\n", token.Error())
+			return
 		}
-		return
-	}
+		defer client.Disconnect(250)
 
-	app := NewApp()
-	err := wails.Run(&options.App{
-		Title:  "Omninode Client",
-		Width:  1024,
-		Height: 768,
-		AssetServer: &assetserver.Options{
-			Assets: assets,
-		},
-		BackgroundColour: &options.RGBA{R: 27, G: 38, B: 54, A: 1},
-		OnStartup:        app.startup,
-		Bind:             []interface{}{app},
-	})
-	if err != nil {
-		log.Fatal(err)
+		fmt.Println("[OmniClient] Connesso al broker MQTT. Invio heartbeat in corso...")
+
+		// Loop di invio heartbeat ogni 5 secondi
+		for {
+			payload := `{"status": "online", "node": "node-local", "timestamp": "` + time.Now().Format(time.RFC3339) + `"}`
+			token := client.Publish("omninode/nodes/node-local/heartbeat", 0, false, payload)
+			token.Wait()
+
+			time.Sleep(5 * time.Second)
+		}
 	}
 }

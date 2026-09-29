@@ -1,5 +1,6 @@
 """Omninode Gateway - FastAPI entry point."""
 import os
+from contextlib import asynccontextmanager
 from typing import Any
 
 from fastapi import FastAPI, Header, HTTPException
@@ -7,12 +8,21 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 
 from mqtt_service import MQTTService
+import task_store
 
 # --- Configuration ---
 OMNINODE_API_KEY = os.environ.get("OMNINODE_API_KEY", "omninode-super-secure-key-2026")
 
+# --- Lifespan Context Manager ---
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    task_store.init_db()
+    mqtt_service.start()
+    yield
+    mqtt_service.stop()
+
 # --- FastAPI App ---
-app = FastAPI(title="Omninode Gateway")
+app = FastAPI(title="Omninode Gateway", lifespan=lifespan)
 
 # --- Services ---
 mqtt_service = MQTTService()
@@ -39,16 +49,6 @@ def get_active_nodes(x_omninode_key: str | None = Header(default=None)) -> dict[
 @app.get("/")
 def serve_dashboard():
     return FileResponse("static/index.html")
-
-# --- Startup/Shutdown Events ---
-@app.on_event("startup")
-async def startup() -> None:
-    await mqtt_service.connect()
-    # Start background work loop task here if needed
-
-@app.on_event("shutdown")
-async def shutdown() -> None:
-    await mqtt_service.disconnect()
 
 # --- Main Entry Point ---
 if __name__ == "__main__":

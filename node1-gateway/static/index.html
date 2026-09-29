@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Omninode Command Center</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <div class="bento-container">
+        <header class="bento-box header">
+            <h1>Omninode Dashboard</h1>
+            <span id="connection-status" class="status-badge online">System Online</span>
+        </header>
+        
+        <main class="bento-box chat-section">
+            <div id="chat-history" class="chat-history">
+                <div class="message system">Inizializzazione terminale... Pronto.</div>
+            </div>
+            <div class="chat-input-area">
+                <input type="text" id="command-input" placeholder="Inserisci un comando in linguaggio naturale o JSON payload..." autocomplete="off">
+                <button id="send-btn">Invia</button>
+            </div>
+        </main>
+        
+        <aside class="bento-box nodes-section">
+            <h2>Active Nodes</h2>
+            <div id="nodes-list" class="nodes-list">
+                <div class="node-card text-muted">Caricamento nodi...</div>
+            </div>
+        </aside>
+    </div>
+    <script src="/static/app.js"></script>
+</body>
+</html>

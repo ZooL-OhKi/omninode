@@ -43,6 +43,9 @@ func main() {
 
 		fmt.Fprintln(os.Stderr, "[OmniClient] Connected to MQTT broker. Sending heartbeat every 5 seconds...")
 
+		// Avvia server WebSocket in background
+		StartWSServer(8080)
+
 		// Graceful shutdown: ascolta SIGINT (Ctrl+C) e SIGTERM
 		sigCh := make(chan os.Signal, 1)
 		signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)

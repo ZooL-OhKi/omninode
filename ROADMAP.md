@@ -1,63 +1,42 @@
-# Omninode Roadmap
+# Roadmap Omninode
 
-See `NEXT_STEPS.md` for the detailed execution plan. This file provides the phase-level view.
+## Completato sul branch `feature/browse-rpc-mqtt`
 
-## Phase 0 — Baseline and reconstruction
+- [x] Rimozione del canale Tampermonkey/DOM State-Overwrite dall'architettura prevista.
+- [x] WebSocket locale ristretto a loopback, Origin allowlist e token; rimozione `exec`.
+- [x] Connessione Chrome reale via CDP.
+- [x] Snapshot AX tree CDP e click tramite input CDP.
+- [x] Struttura sessioni browser e ref temporanei.
+- [x] Base Gateway MCP/MQTT in FastAPI.
+- [x] Dashboard SSE Bento Box e heartbeat/routing dinamico a livello di codice.
 
-Status: complete.
+## In validazione
 
-Repository, branch, implementation checkpoint, documentation, security model, repository map, onboarding prompt, and operations runbook are available.
+- [ ] Build reale di `playwright-go` e funzioni CDP sul target Windows/ARM.
+- [ ] Worker MQTT mTLS completo, resilienza reconnect e deduplicazione task.
+- [ ] Compatibilita' del trasporto MCP con connector scelto.
+- [ ] Cloudflare Tunnel + Access con dashboard umana e `/mcp` M2M.
+- [ ] Test end-to-end Chrome reale, Mosquitto e dashboard mobile.
 
-## Phase 1 — Real local vertical slice
+## Pianificato
 
-Status: next.
+### Step 5 - Ops CLI e Human-in-the-loop
 
-MCP/HTTP → FastAPI → MQTT → local `omniclient` → policy → `workspace.write` → correlated response.
+- [ ] Tool `ops.terraform` e `ops.oci` tipizzati.
+- [ ] Allowlist di argomenti e runner senza shell.
+- [ ] Stato persistente delle approvazioni, TTL e audit.
+- [ ] Alert MQTT/SSE e decisione dashboard.
 
-The first result must be a real file in a temporary registered workspace, not a mock.
+### Stabilita' e sicurezza
 
-## Phase 2 — Reliable task lifecycle
+- [ ] Persistenza Postgres/SQLite per task, audit, routing e approvazioni.
+- [ ] Expiry dei nodi e health checking.
+- [ ] Rate limiting, CSRF e limiti SSE.
+- [ ] Policy Mosquitto ACL e rotazione certificati.
+- [ ] CI che esegue build Go, lint Python e test di contratto MQTT.
 
-Status: planned.
+### Browser capabilities
 
-202 responses, status endpoint, durable task identity, explicit states, deadlines, idempotency, bounded retries, duplicate control, and audit retention.
-
-## Phase 3 — Secure network fabric
-
-Status: planned.
-
-TLS/mTLS, per-node identity, topic ACLs, credential rotation, anonymous-access denial, reconnect behavior, and unauthorized-access monitoring.
-
-## Phase 4 — Multi-node orchestration
-
-Status: planned.
-
-Registration, heartbeats, capability advertisement, routing, backpressure, concurrency limits, cancellation, drain, and retry ownership.
-
-## Phase 5 — MCP productization
-
-Status: planned.
-
-Stable schemas, progress semantics, configuration examples, supported-host compatibility, and real error propagation.
-
-## Phase 6 — Browser capability
-
-Status: planned and constrained.
-
-Isolated contexts, ephemeral profiles, domain allowlists, bounded transfers, human handoff, and no evasion/bypass features.
-
-## Phase 7 — Oracle deployment and CI/CD
-
-Status: blocked until Phases 1 and 3 are complete.
-
-Packaging, staging, secrets, health, rollback, protected workflows, and resource budgets.
-
-## Phase 8 — Dashboard and operator experience
-
-Status: later.
-
-Timeline, node health, audit viewer, approvals, cancellation, and dashboard.
-
-## Sequencing rule
-
-Do not move to dashboards, broad autonomy, browser automation, or public cloud deployment until Phase 1 has produced a real end-to-end result and Phase 3 has established network security.
+- [ ] `web.goto`, `web.type`, `web.key`, `web.scroll`, screenshot controllati.
+- [ ] Gestione iframe/shadow DOM e navigazioni SPA.
+- [ ] Limiti per tab, sessioni e concorrenza multi-agente.

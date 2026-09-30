@@ -1,128 +1,92 @@
 # Omninode
 
-Omninode is a distributed AI execution fabric: external AI systems express structured intent, trusted gateways coordinate work, MQTT carries messages, and local nodes execute only explicitly authorized capabilities.
+Omninode e' un control plane per agenti AI distribuiti: i connector MCP remoti chiamano il Gateway su Oracle Cloud, il Gateway instrada i task tramite MQTT mTLS ai worker locali e i worker eseguono browser automation CDP oppure tool operativi controllati.
 
-The project is built around one principle:
+> Stato del branch `feature/browse-rpc-mqtt`: gli Step 1-6 sono stati implementati a livello di codice. La compilazione e i test end-to-end su Oracle/Mosquitto/Chrome reale restano obbligatori prima dell'uso in produzione.
 
-> Remote intelligence may request work; local policy decides whether work may happen.
-
-Omninode is therefore not a remote shell and not a collection of blindly obedient agents. It is a cooperative fabric with local autonomy, least privilege, observable execution, deterministic failure, and gradual delivery.
-
-## Current status
-
-Active branch: `feature/browse-rpc-mqtt`
-
-Latest documentation checkpoint before this update: `eb678f9`
-
-Current state:
-
-- Python gateway present.
-- Go `omniclient` present.
-- MQTT service and request/reply scaffolding present.
-- Capability, audit, workspace, executor, browser-policy, and work-loop modules present.
-- Documentation and AI handover guides are being consolidated.
-- Local unit and language checks previously passed.
-- The real MQTT vertical slice is the next operational milestone.
-
-Do not describe the system as production-ready until a real task has traversed gateway → MQTT → local node → executor → correlated response.
-
-## Philosophy
-
-Omninode favors:
-
-- local authority over remote control;
-- explicit capabilities over implicit trust;
-- structured tasks over shell strings;
-- auditability over invisible automation;
-- safe denial over unsafe convenience;
-- a small real vertical slice over a broad mock system;
-- documented decisions over repeated rediscovery.
-
-Autonomy means that workers can decide and coordinate within their granted boundaries. It does not mean bypassing security, hiding activity, evading anti-bot systems, or accessing a host without authorization.
-
-## System flow
+## Architettura
 
 ```text
-AI / MCP host
-    |
-    v
-Go omniclient MCP interface
-    |
-    v
-FastAPI gateway
-    |
-    v
-MQTT broker
-    |
-    v
-Node-specific omniclient subscriber
-    |
-    v
-Policy + capability + workspace checks
-    |
-    v
-Local executor
-    |
-    v
-Authorized resource
+LLM / MCP Connector
+        |
+        | HTTPS /mcp
+        v
+Oracle A: FastAPI Gateway + Cloudflare Tunnel
+        |
+        | MQTT mTLS :8883
+        v
+Oracle B: Mosquitto
+        |
+        +-------------------------------+
+        |                               |
+        v                               v
+Windows Ryzen worker                 Surface worker
+Go + Chrome reale CDP                Go + Chrome reale CDP
 ```
 
-MQTT is a transport and coordination mechanism. It is not the final authorization boundary. The local node must validate identity, capability, workspace, path, deadline, and budget before performing work.
+- **Oracle A:** dashboard Bento Box, endpoint MCP, SSE e routing dinamico basato su heartbeat.
+- **Oracle B:** broker MQTT con autenticazione reciproca TLS e ACL per nodo.
+- **Worker locali:** connessioni esclusivamente in uscita, browser Chrome reale via CDP locale e WebSocket locale opzionale.
 
-## First useful capability
+## Componenti
 
-The first operational capability is `workspace.write`:
+| Percorso | Responsabilita' |
+|---|---|
+| `node1-gateway/` | Gateway FastAPI, dashboard, SSE, bridge MQTT e instradamento MCP |
+| `omniclient/` | Worker Go, browser CDP, snapshot AX tree, click tramite input CDP, MQTT e heartbeat |
+| `docs/` | Documentazione aggiuntiva del progetto |
 
-- caller supplies a registered `workspace_id`;
-- path is relative to that workspace;
-- traversal, absolute paths, symlink escape, sensitive directories, and oversized content are rejected;
-- write is atomic;
-- result reports task identity and bounded metadata;
-- every decision is auditable.
+## Flussi principali
 
-Do not begin with arbitrary shell execution, real Desktop-wide access, credentials, personal browser profiles, or browser anti-detection.
+### Browser automation
 
-## Repository guides
+1. Il connector chiama `/mcp` sul Gateway.
+2. Il Gateway seleziona un worker da `agent_id -> node_id` e pubblica un task MQTT.
+3. Il worker recupera una `WebSession`, estrae l'Accessibility Tree con CDP e restituisce un testo compatto; i ref sono validi solo fino al prossimo snapshot.
+4. I click usano `Input.dispatchMouseEvent`, non `element.click()`.
 
-Read in this order:
+### Human-in-the-loop
 
-1. `docs/AI_ONBOARDING.md` — complete prompt and reconstruction procedure for a new AI.
-2. `PROJECT_HANDOVER.md` — current engineering state and immediate continuation task.
-3. `docs/REPOSITORY_MAP.md` — file ownership and call-graph navigation.
-4. `ARCHITECTURE.md` — component boundaries and protocol model.
-5. `SECURITY.md` — non-negotiable guardrails.
-6. `docs/OPERATIONS_RUNBOOK.md` — synchronization, validation, local runtime, and recovery.
-7. `ROADMAP.md` — ordered milestones.
-8. `INDEX.md` — compact navigation index.
+Le operazioni distruttive devono pubblicare `pending_approval`, generare un alert MQTT e attendere una decisione umana della dashboard. Nessun tool deve eseguire shell arbitraria.
 
-## Immediate milestone
+## Avvio locale del worker
 
-Implement and demonstrate one local vertical slice:
+1. Avvia Chrome con debugging locale, ad esempio:
+   ```powershell
+   chrome.exe --remote-debugging-port=9222 --user-data-dir=C:\omninode-chrome
+   ```
+2. Configura le variabili richieste:
+   ```powershell
+   $env:OMNI_WS_TOKEN = "token-lungo-almeno-32-caratteri"
+   $env:OMNI_WS_ORIGINS = "http://127.0.0.1:8080"
+   $env:OMNI_NODE_ID = "ryzen"
+   $env:OMNI_MQTT_BROKER = "tls://oracle-b.plini.net:8883"
+   $env:OMNI_MQTT_CA = "certs/ca.crt"
+   $env:OMNI_MQTT_CERT = "certs/client.crt"
+   $env:OMNI_MQTT_KEY = "certs/client.key"
+   ```
+3. Compila e avvia:
+   ```powershell
+   cd omniclient
+   go mod tidy
+   go build ./...
+   go run .
+   ```
 
-```text
-MCP/HTTP dispatch
-  -> FastAPI creates a structured task
-  -> MQTT publishes to one node topic
-  -> local omniclient receives it
-  -> local policy validates it
-  -> workspace.write creates one temporary file
-  -> node publishes correlated response
-  -> gateway/MCP returns the real result
+## Avvio Gateway
+
+Sul nodo Oracle A configura `MQTT_BROKER`, `MQTT_CA`, `MQTT_CERT`, `MQTT_KEY`, `MCP_SECRET`, `OMNI_BIND=127.0.0.1` e `OMNI_PORT=8000`, quindi:
+
+```bash
+cd node1-gateway
+python -m venv .venv
+. .venv/bin/activate
+pip install -r requirements.txt
+uvicorn main:app --host 127.0.0.1 --port 8000
 ```
 
-Use a loopback broker and a temporary workspace first. Add persistence, TLS, network ACLs, cloud deployment, scheduling, and dashboards only after this path is real and observable.
+Il gateway deve essere esposto tramite Cloudflare Tunnel, non direttamente su Internet. Vedi `ARCHITECTURE.md` e `SECURITY.md`.
 
-## Synchronization
+## Stato e prossimi passi
 
-```powershell
-Set-Location A:\omninode
-git fetch origin
-git pull --ff-only origin feature/browse-rpc-mqtt
-git status --short
-```
-
-Never use `git reset --hard` or `git push --force` to hide an ordinary synchronization problem.
-
-## Non-goals
-
-The project must not implement unrestricted remote shell, credential harvesting, fingerprint spoofing, WebDriver masking, CAPTCHA bypass, synthetic biometric interaction, proxy rotation for evasion, silent account creation, or unauthorized access to personal profiles.
+Consulta `NEXT_STEPS.md` per checklist di build, test MQTT, configurazione Mosquitto, Cloudflare Access e Step 5 (Ops CLI con approvazione umana).

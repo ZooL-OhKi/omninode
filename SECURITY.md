@@ -1,92 +1,57 @@
-# Omninode Security Model
+# Sicurezza Omninode
 
-## Core position
+## Principi
 
-All remote task input is untrusted. Authentication identifies a caller; authorization is a separate decision. The local node is the final security boundary.
+1. Nessun comando shell arbitrario da LLM, browser, WebSocket o MQTT.
+2. Ogni confine usa autenticazione esplicita, autorizzazione minima e TLS.
+3. Le operazioni distruttive richiedono conferma umana e audit.
+4. I segreti non devono essere committati nel repository.
 
-## Trust zones
+## Gateway
 
-```text
-AI/MCP input -> gateway -> MQTT transport -> local node policy -> authorized resource
-```
-
-A broker may deliver a message. It cannot grant permission to execute it.
-
-## Capability model
-
-Capabilities must be explicit, narrow, scoped to agent/goal/node/resource, time-limited, budget-limited, revocable, and auditable. Default is deny.
-
-Initial capability: `workspace.write` only.
-
-It does not imply:
-
-- arbitrary shell execution;
-- arbitrary file reads;
-- credential access;
-- Desktop-wide access;
-- browser control;
-- account creation;
-- network access.
-
-## Workspace confinement
-
-Use registered workspace IDs and relative paths. Resolve paths and verify containment after resolution. Reject:
-
-- absolute paths;
-- `..` traversal;
-- symlink escapes;
-- `.ssh`, `.env`, key, token, credential, and secret locations;
-- excessive file size or count;
-- unregistered workspace roots.
-
-Use atomic writes. Audit action, identity, resource, decision, policy version, and bounded result metadata without storing unnecessary secrets or file content.
-
-## Command execution
-
-Do not execute arbitrary shell text from an AI. Future process capabilities must use argv allowlists, `shell=false`, minimal environment, confined cwd, timeout, output limits, resource limits, and audit.
+- Esporre il Gateway solo dietro Cloudflare Tunnel; Uvicorn deve ascoltare su `127.0.0.1`.
+- Proteggere la dashboard con Cloudflare Access interattivo.
+- Proteggere `/mcp` con una policy M2M distinta e autenticazione applicativa forte.
+- `MCP_SECRET` deve essere un segreto lungo, unico e custodito in secret manager/variabili d'ambiente.
+- Non usare valori di default pubblici per API key o token.
+- Proteggere `POST /api/v1/approve` con Access/sessione utente e protezione CSRF prima del deploy.
+- Limitare richiesta, risposta, numero SSE e rate per IP/identita'.
 
 ## MQTT
 
-Loopback unauthenticated MQTT is permitted only for local development while inaccessible from the network. Network operation requires TLS/mTLS, per-node identity, ACLs, unique client IDs, non-retained executable tasks, bounded QoS, and credential rotation.
+- Usare TLS con verifica server e certificati client distinti per gateway/worker.
+- Disabilitare connessioni anonime su Mosquitto.
+- Applicare ACL a topic minimi: un worker non deve pubblicare risultati come un altro worker.
+- Validare rigorosamente `node_id`, `agent_id`, `task_id` e payload prima di usarli nei topic.
+- QoS 1 non elimina la necessita' di idempotenza: il worker deve gestire task duplicati per `task_id`.
 
-Recommended topic permissions:
+## Worker locale
 
-```text
-gateway:
-  write omninode/v1/nodes/+/tasks
-  read  omninode/v1/nodes/+/responses
+- Chrome CDP deve essere esposto solo su `127.0.0.1`; non pubblicare mai la porta 9222 su LAN o Internet.
+- Usare un `--user-data-dir` dedicato e proteggere il profilo browser.
+- Il WebSocket locale ascolta solo su loopback, richiede Origin in allowlist e un token non riutilizzato.
+- L'azione `exec` e' rimossa: azioni consentite al WS sono limitate e tipizzate.
+- Certificati client e chiavi private devono avere permessi stretti e non finire nel repository.
 
-node-local:
-  read  omninode/v1/nodes/node-local/tasks
-  write omninode/v1/nodes/node-local/responses
-  write omninode/v1/nodes/node-local/heartbeat
-```
+## Browser agent
 
-Never expose an anonymous administrative broker publicly.
+- I contenuti delle pagine sono input non fidato e possono contenere prompt injection.
+- Non trattare testo della pagina, HTML, AX tree o screenshot come istruzioni privilegiate.
+- Applicare conferma umana per login, invio form, pagamenti, cancellazioni e cambiamenti di infrastruttura.
+- Ref dell'AX tree scadono dopo un nuovo snapshot o re-render; non riutilizzarli.
 
-## Browser
+## Ops CLI
 
-Use isolated contexts, ephemeral profiles, domain allowlists, bounded transfers, and human handoff for CAPTCHA, MFA, payments, credentials, account creation, and anti-bot friction.
+- Consentire esclusivamente tool tipizzati e allowlisted.
+- Usare `exec.Command(binary, args...)` e una directory di lavoro fissata.
+- Rifiutare opzioni, path e sotto-comandi non autorizzati.
+- `terraform apply`, `destroy`, azioni OCI delete e equivalenti devono entrare in `pending_approval`.
+- Imporre timeout, output massimo, audit e approvazione a tempo limitato.
 
-Forbidden: fingerprint spoofing, WebDriver masking, Canvas/WebGL/Audio spoofing, synthetic biometric motion, proxy rotation for evasion, CAPTCHA bypass, and personal profile reuse.
+## Incident response
 
-## Secrets
-
-Never commit keys, passwords, MQTT credentials, private certificates, cookies, personal profiles, `.env`, `venv`, caches, or generated binaries. Rotate anything exposed in source or terminal output.
-
-## Audit
-
-Audit records should include audit ID, UTC timestamp, task ID, goal ID, agent ID, node ID, action, resource, policy version, decision, reason, and bounded result metadata.
-
-## Security acceptance
-
-The local vertical slice is acceptable only when:
-
-- valid task succeeds;
-- wrong node is blocked;
-- unsupported capability is blocked;
-- expired task is not executed;
-- traversal and symlink escapes are blocked;
-- duplicate delivery is controlled;
-- another node's topic cannot be read or written;
-- actual result is returned to the caller.
+1. Revocare il certificato MQTT del nodo compromesso e aggiornare l'ACL.
+2. Ruotare `MCP_SECRET`, token WS e credenziali Cloudflare Access.
+3. Fermare cloudflared/Gateway se l'esposizione e' sospetta.
+4. Esaminare audit log per `task_id`, `agent_id`, `node_id` e timestamp.
+5. Ripristinare il worker solo dopo build pulita e verifica certificati.

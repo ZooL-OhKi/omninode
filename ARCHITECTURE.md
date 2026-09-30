@@ -1,125 +1,99 @@
-# Omninode Architecture
+# Architettura Omninode
 
-## Purpose
-
-Omninode is a distributed fabric for AI-assisted and autonomous work across trusted nodes. It separates intent, coordination, transport, authorization, and execution so that no remote request automatically becomes host authority.
-
-## Component model
-
-### AI and MCP host
-
-The AI chooses a typed tool and submits structured input. It must receive a structured result, not a claim that work happened.
-
-### Go `omniclient`
-
-`omniclient` is the lightweight integration surface. It exposes MCP-facing operations and participates in gateway/node communication. It must not turn model text into arbitrary shell commands.
-
-### FastAPI gateway
-
-The gateway exposes HTTP, validates request shape, tracks nodes and tasks, and publishes MQTT work. It is a coordinator, not the final authority over a local filesystem.
-
-### MQTT broker
-
-MQTT transports tasks, responses, heartbeats, and events. Recommended topics:
+## Topologia
 
 ```text
-omninode/v1/nodes/{node_id}/tasks
-omninode/v1/nodes/{node_id}/responses
-omninode/v1/nodes/{node_id}/heartbeat
-omninode/v1/nodes/{node_id}/events
+MCP connector / LLM
+  | HTTPS JSON-RPC
+  v
+Cloudflare Access + Tunnel (plini.net)
+  |
+  v
+Oracle A: FastAPI Gateway
+  |-- /                 Dashboard Bento Box (SSE)
+  |-- /api/v1/stream    Event stream dashboard
+  |-- /api/v1/approve   Decisione human-in-the-loop
+  `-- /mcp              Ingresso MCP
+  |
+  | MQTT mTLS (TCP 8883)
+  v
+Oracle B: Mosquitto
+  |
+  +-- omninode/nodes/{node}/cmd/{task}
+  +-- omninode/nodes/{node}/result/{task}
+  +-- omninode/nodes/{node}/heartbeat
+  +-- omninode/alerts/approval
+  `-- omninode/approvals/in
+  |
+  v
+Worker Go locali (Ryzen / Surface)
+  |-- Chrome reale via CDP su 127.0.0.1:9222
+  |-- Playwright-Go + CDP raw
+  `-- WebSocket locale opzionale su 127.0.0.1:8080
 ```
 
-A node subscribes only to its own task topic. Executable task messages are never retained.
+## Gateway
 
-### Local node executor
+`node1-gateway/main.py` mantiene in memoria:
 
-The node validates the task again and dispatches only named capabilities. The first capability is `workspace.write`.
+- `active_nodes`: stato ricavato dagli heartbeat.
+- `agent_routing`: mappa agente -> nodo, ricavata da `supported_agents` nell'heartbeat.
+- `pending_mcp_requests`: Future in attesa di un risultato MQTT.
+- `sse_clients`: code asincrone per dashboard connesse.
 
-## Canonical task envelope
+Il Gateway inoltra alert di approvazione e aggiornamenti nodi ai browser tramite Server-Sent Events.
+
+## Worker
+
+Il worker usa Chrome reale avviato localmente con remote debugging CDP. La sessione browser di default e' deliberatamente collegata al profilo Chrome reale quando occorrono sessioni utente esistenti. L'isolamento per agente non e' attivo di default: gli agenti devono quindi usare tab/sessioni separate e il worker deve serializzare le operazioni concorrenti sulla stessa sessione.
+
+### Browser control
+
+- `Accessibility.getFullAXTree` produce la base del snapshot.
+- Gli elementi interattivi ricevono ref numerici temporanei, associati a `backendDOMNodeId`.
+- `DOM.scrollIntoViewIfNeeded`, `DOM.getContentQuads` e `Input.dispatchMouseEvent` sono usati per il click.
+- I ref vanno considerati invalidi dopo un nuovo snapshot o un re-render SPA.
+
+## Contratti MQTT
+
+### Command
+
+Topic: `omninode/nodes/{node_id}/cmd/{task_id}`
 
 ```json
-{
-  "schema_version": 1,
-  "task_id": "uuid",
-  "goal_id": "uuid",
-  "agent_id": "agent-id",
-  "node_id": "node-local",
-  "task_type": "workspace.write",
-  "capability": "workspace.write",
-  "created_at": "2026-09-22T13:00:00Z",
-  "deadline_at": "2026-09-22T13:05:00Z",
-  "payload": {
-    "workspace_id": "temporary",
-    "path": "hello.txt",
-    "content": "hello"
-  }
-}
+{"task_id":"...","agent_id":"agent_1","action":"web_snapshot","ref":null}
 ```
 
-Response envelope:
+### Result
+
+Topic: `omninode/nodes/{node_id}/result/{task_id}`
 
 ```json
-{
-  "schema_version": 1,
-  "task_id": "uuid",
-  "goal_id": "uuid",
-  "node_id": "node-local",
-  "status": "completed",
-  "data": {
-    "path": "hello.txt",
-    "bytes_written": 5
-  },
-  "error": null
-}
+{"task_id":"...","status":"success","output":"..."}
 ```
 
-## Lifecycle
+### Heartbeat
 
-```text
-created -> validated -> queued -> dispatched -> running
-                                             |        |
-                                             v        v
-                                         completed  failed
-                                             |
-                                         blocked/expired
+Topic: `omninode/nodes/{node_id}/heartbeat`
+
+```json
+{"node_id":"ryzen","status":"online","supported_agents":["agent_1","devops_bot"],"timestamp":"2026-09-30T10:00:00Z"}
 ```
 
-Every transition must be attributable to a task, goal, agent, node, timestamp, decision, and audit record.
+### Approval
 
-## Request/reply
+- Alert: `omninode/alerts/approval`
+- Decisione: `omninode/approvals/in`
 
-Use MQTT 5 response-topic and correlation-data properties when supported by the client library. Keep `task_id` and `goal_id` in the JSON body for diagnostics and compatibility.
+I payload devono contenere almeno `task_id`, `agent_id`, descrizione dell'operazione e decisione/risultato.
 
-The gateway needs a thread-safe pending map keyed by correlation ID. It must reject malformed, late, unknown, or wrong-node replies. QoS 1 is acceptable only when task execution is idempotent.
+## MCP
 
-## Node execution boundary
+Il Gateway espone `/mcp` via HTTPS. Il trasporto previsto e' JSON-RPC/Streamable HTTP; il codice corrente contiene una base MCP e deve essere validato con il connector specifico prima dell'uso. L'autenticazione applicativa usa un Bearer token (`MCP_SECRET`) dietro Cloudflare Access.
 
-The local executor must verify:
+## Limitazioni note
 
-- node identity;
-- agent and goal identity;
-- capability;
-- registered workspace;
-- normalized relative path;
-- symlink containment;
-- size and time budgets;
-- approval and deadline policy.
-
-Transport delivery never bypasses these checks.
-
-## Browser boundary
-
-Browser support is an independent capability and must use isolated contexts, ephemeral profiles by default, domain allowlists, bounded transfers, and human handoff for CAPTCHA, MFA, payment, credential requests, account creation, or anti-bot friction.
-
-No fingerprint spoofing, WebDriver masking, Canvas/WebGL/Audio spoofing, synthetic biometrics, evasion proxy rotation, CAPTCHA bypass, or personal browser-profile reuse.
-
-## Deployment phases
-
-1. Loopback local vertical slice.
-2. Reliable task lifecycle and idempotency.
-3. TLS and per-node topic ACLs.
-4. Multi-node health, routing, capacity, and cancellation.
-5. Cloud deployment and protected CI/CD.
-6. Browser and dashboard capabilities.
-
-Do not reverse this order.
+- Il codice CDP/Playwright-Go deve essere compilato contro la versione effettiva del modulo prima del deploy.
+- Il worker MQTT definitivo (`mqtt_client.go`) e l'handler delle approvazioni ops devono essere verificati/integrati prima del deployment di produzione.
+- Gli state store del gateway sono in memoria: un riavvio perde routing, richieste pendenti e SSE; gli heartbeat ripopolano il routing. Per task di approvazione serve persistenza (SQLite/Postgres) nello Step 5.
+- Il Gateway non deve usare fallback silenziosi su un nodo: se non esiste routing vivo per l'agente, deve restituire un errore esplicito.

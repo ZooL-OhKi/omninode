@@ -6,7 +6,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/ZooL-OhKi/omninode/omniclient/mqttclient"
+	"github.com/ZooL-OhKi/omniclient/mqttclient"
 )
 
 func main() {

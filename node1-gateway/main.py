@@ -1,61 +1,26 @@
-"""Omninode Gateway - FastAPI entry point.
-
-Integra:
-- MCP endpoint (/mcp) con auth Bearer
-- SSE per aggiornamenti real-time della dashboard
-- Listener MQTT (mTLS) per alert, heartbeat e risultati
-- Routing dinamico agent_id -> node_id
-- Endpoint /api/v1/approve per approvazioni human-in-the-loop
-"""
 import os
-import ssl
 import json
 import asyncio
-import logging
+import time
 from contextlib import asynccontextmanager
-from typing import Any, Dict, List
-
-import aiomqtt
 from fastapi import FastAPI, Depends, HTTPException, Request, Header
 from fastapi.responses import JSONResponse, FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
+import aiomqtt
 
-log = logging.getLogger("omninode.main")
-logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
-
-# --- Configurazione ---
 MQTT_BROKER = os.getenv("MQTT_BROKER", "oracle-b.plini.net")
-MQTT_PORT = int(os.getenv("MQTT_PORT", "8883"))
-MQTT_CA = os.getenv("MQTT_CA", "certs/ca.crt")
-MQTT_CERT = os.getenv("MQTT_CERT", "certs/client.crt")
-MQTT_KEY = os.getenv("MQTT_KEY", "certs/client.key")
+MQTT_PORT = int(os.getenv("MQTT_PORT", 8883))
 MCP_SECRET = os.getenv("MCP_SECRET", "super-secret-mcp-token")
-BIND_HOST = os.getenv("OMNI_BIND", "127.0.0.1")
-BIND_PORT = int(os.getenv("OMNI_PORT", "8000"))
 
-# --- Stato in memoria ---
-active_nodes: Dict[str, Any] = {}
-agent_routing: Dict[str, str] = {}
-pending_mcp_requests: Dict[str, asyncio.Future] = {}
-sse_clients: List[asyncio.Queue] = []
+# Stato globale in memoria
+active_nodes = {}      # node_id -> {"last_seen": float, "info": dict}
+agent_routing = {}     # agent_id -> node_id
+pending_mcp_requests = {}
+sse_clients = []       # Code asyncio.Queue per i client SSE connessi
 
 
-def _mqtt_tls_context() -> ssl.SSLContext:
-    """Costruisce il contesto TLS per MQTT mTLS."""
-    ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
-    ctx.load_verify_locations(MQTT_CA)
-    ctx.load_cert_chain(MQTT_CERT, MQTT_KEY)
-    return ctx
-
-
-async def mqtt_listener_task() -> None:
-    """Ascolta alert, heartbeat e risultati MQTT e inoltra ai client SSE."""
-    async with aiomqtt.Client(
-        hostname=MQTT_BROKER,
-        port=MQTT_PORT,
-        tls_context=_mqtt_tls_context(),
-        identifier="omninode-gateway-listener",
-    ) as client:
+async def mqtt_listener_task():
+    async with aiomqtt.Client(hostname=MQTT_BROKER, port=MQTT_PORT) as client:
         await client.subscribe("omninode/alerts/approval")
         await client.subscribe("omninode/nodes/+/heartbeat")
         await client.subscribe("omninode/nodes/+/result/+")
@@ -68,17 +33,18 @@ async def mqtt_listener_task() -> None:
                 continue
 
             if topic == "omninode/alerts/approval":
-                # Inoltra a tutti i client SSE
-                sse_msg = f"event: approval_alert\ndata: {json.dumps(data)}\n\n"
+                sse_msg = f"event: approval_alert\ndata: {msg.payload.decode()}\n\n"
                 for q in sse_clients:
                     await q.put(sse_msg)
 
             elif topic.startswith("omninode/nodes/") and topic.endswith("/heartbeat"):
                 node_id = topic.split("/")[2]
-                active_nodes[node_id] = data
+                active_nodes[node_id] = {"last_seen": time.time(), "info": data}
                 for agent_id in data.get("supported_agents", []):
                     agent_routing[agent_id] = node_id
-                nodes_msg = f"event: node_update\ndata: {json.dumps(active_nodes)}\n\n"
+
+                nodes_payload = {n_id: d["info"] for n_id, d in active_nodes.items()}
+                nodes_msg = f"event: node_update\ndata: {json.dumps(nodes_payload)}\n\n"
                 for q in sse_clients:
                     await q.put(nodes_msg)
 
@@ -90,11 +56,33 @@ async def mqtt_listener_task() -> None:
                         fut.set_result(data)
 
 
+async def node_expiry_task():
+    while True:
+        now = time.time()
+        expired_nodes = [n_id for n_id, d in active_nodes.items() if now - d.get("last_seen", 0) > 90]
+
+        for node_id in expired_nodes:
+            del active_nodes[node_id]
+            keys_to_delete = [k for k, v in agent_routing.items() if v == node_id]
+            for k in keys_to_delete:
+                del agent_routing[k]
+
+        if expired_nodes:
+            nodes_payload = {n_id: d["info"] for n_id, d in active_nodes.items()}
+            nodes_msg = f"event: node_update\ndata: {json.dumps(nodes_payload)}\n\n"
+            for q in sse_clients:
+                await q.put(nodes_msg)
+
+        await asyncio.sleep(15)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    task = asyncio.create_task(mqtt_listener_task())
+    listener_task = asyncio.create_task(mqtt_listener_task())
+    expiry_task = asyncio.create_task(node_expiry_task())
     yield
-    task.cancel()
+    listener_task.cancel()
+    expiry_task.cancel()
 
 
 app = FastAPI(title="Omninode Gateway", lifespan=lifespan)
@@ -102,25 +90,22 @@ os.makedirs("static", exist_ok=True)
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
 
-async def verify_mcp_auth(authorization: str = Header(None)) -> None:
+async def verify_mcp_auth(authorization: str = Header(None)):
     if not authorization or authorization != f"Bearer {MCP_SECRET}":
-        raise HTTPException(status_code=401, detail="Token non valido")
-
-
-# --- Endpoints ---
+        raise HTTPException(status_code=401, detail="Token MCP non valido o mancante")
 
 
 @app.get("/")
-def serve_dashboard() -> FileResponse:
+def serve_dashboard():
     return FileResponse("static/index.html")
 
 
 @app.get("/api/v1/stream")
-async def sse_stream(request: Request) -> StreamingResponse:
-    """SSE per aggiornamenti real-time della Bento Box UI."""
-    q: asyncio.Queue = asyncio.Queue()
+async def sse_stream(request: Request):
+    q = asyncio.Queue()
     sse_clients.append(q)
-    await q.put(f"event: node_update\ndata: {json.dumps(active_nodes)}\n\n")
+    nodes_payload = {n_id: d["info"] for n_id, d in active_nodes.items()}
+    await q.put(f"event: node_update\ndata: {json.dumps(nodes_payload)}\n\n")
 
     async def event_generator():
         try:
@@ -136,53 +121,39 @@ async def sse_stream(request: Request) -> StreamingResponse:
 
 
 @app.get("/api/v1/nodes")
-def get_nodes() -> Dict[str, Any]:
-    return active_nodes
+def get_nodes():
+    return {n_id: d["info"] for n_id, d in active_nodes.items()}
 
 
 @app.post("/api/v1/approve")
-async def approve_task(payload: dict) -> dict:
-    """Riceve la decisione dalla UI e la invia al worker Go via MQTT."""
+async def approve_task(payload: dict):
     task_id = payload.get("task_id")
     decision = payload.get("decision")
     if decision not in ["approve", "reject"]:
-        raise HTTPException(status_code=400, detail="Decisione non valida")
-
+        raise HTTPException(400, "Decisione non valida")
     msg = {"task_id": task_id, "approved": decision == "approve"}
-    async with aiomqtt.Client(
-        hostname=MQTT_BROKER,
-        port=MQTT_PORT,
-        tls_context=_mqtt_tls_context(),
-    ) as client:
+    async with aiomqtt.Client(hostname=MQTT_BROKER, port=MQTT_PORT) as client:
         await client.publish("omninode/approvals/in", json.dumps(msg))
-    return {"status": "ok", "message": "Decisione inviata al fabric"}
+    return {"status": "ok", "message": "Decisione inoltrata al fabric"}
 
 
 @app.post("/mcp", dependencies=[Depends(verify_mcp_auth)])
-async def mcp_endpoint(request: Request) -> JSONResponse:
-    """Endpoint per chiamate MCP Remote da Claude/ChatGPT/Gemini."""
+async def mcp_endpoint(request: Request):
     payload = await request.json()
     task_id = payload.get("id", f"req_{os.urandom(4).hex()}")
-    params = payload.get("params", {})
-    agent_id = params.get("agent_id", "agent_1")
+    agent_id = payload.get("params", {}).get("agent_id", "agent_1")
     target_node = agent_routing.get(agent_id, "ryzen")
-
-    method = payload.get("method", "")
-    action = "web_snapshot" if method == "web_snapshot" else "web_click" if method == "web_click" else method
-    ref = params.get("ref")
-
-    cmd_payload = {"task_id": task_id, "agent_id": agent_id, "action": action, "ref": ref}
-
+    cmd_payload = {
+        "task_id": task_id,
+        "agent_id": agent_id,
+        "action": payload.get("method"),
+        "ref": payload.get("params", {}).get("subcmd", ""),
+    }
     loop = asyncio.get_event_loop()
     fut = loop.create_future()
     pending_mcp_requests[task_id] = fut
-
     try:
-        async with aiomqtt.Client(
-            hostname=MQTT_BROKER,
-            port=MQTT_PORT,
-            tls_context=_mqtt_tls_context(),
-        ) as client:
+        async with aiomqtt.Client(hostname=MQTT_BROKER, port=MQTT_PORT) as client:
             await client.publish(f"omninode/nodes/{target_node}/cmd/{task_id}", json.dumps(cmd_payload))
             result = await asyncio.wait_for(fut, timeout=20.0)
             if result.get("status") == "pending_approval":
@@ -193,11 +164,11 @@ async def mcp_endpoint(request: Request) -> JSONResponse:
                 })
             return JSONResponse({"jsonrpc": "2.0", "id": task_id, "result": result})
     except asyncio.TimeoutError:
-        return JSONResponse(status_code=504, content={"error": "Timeout worker locale"})
+        return JSONResponse(status_code=504, content={"error": "Timeout in attesa del worker locale"})
     finally:
         pending_mcp_requests.pop(task_id, None)
 
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host=BIND_HOST, port=BIND_PORT)
+    uvicorn.run(app, host="0.0.0.0", port=8000)

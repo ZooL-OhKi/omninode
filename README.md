@@ -1,92 +1,168 @@
-# Omninode
+# OmniNode
 
-Omninode e' un control plane per agenti AI distribuiti: i connector MCP remoti chiamano il Gateway su Oracle Cloud, il Gateway instrada i task tramite MQTT mTLS ai worker locali e i worker eseguono browser automation CDP oppure tool operativi controllati.
+Sistema distribuito per l'automazione browser e operazioni infrastrutturali tramite MCP (Model Context Protocol).
 
-> Stato del branch `feature/browse-rpc-mqtt`: gli Step 1-6 sono stati implementati a livello di codice. La compilazione e i test end-to-end su Oracle/Mosquitto/Chrome reale restano obbligatori prima dell'uso in produzione.
+## Panoramica
+
+OmniNode è un'architettura client-gateway che espone capacità di automazione browser (CDP) e operazioni infrastrutturali (Terraform) attraverso un server MCP locale. Il sistema è composto da due componenti principali:
+
+- **omniclient (Go)**: Server MCP locale che esegue su macchina client, espone tool `browser_*` e `ops_*`, gestisce Chrome DevTools Protocol (CDP) locale e comunica con il gateway
+- **node1-gateway (Python/FastAPI)**: Gateway centrale che gestisce MQTT, task store, policy engine, audit logging e browser runtime remoto
 
 ## Architettura
 
-```text
-LLM / MCP Connector
-        |
-        | HTTPS /mcp
-        v
-Oracle A: FastAPI Gateway + Cloudflare Tunnel
-        |
-        | MQTT mTLS :8883
-        v
-Oracle B: Mosquitto
-        |
-        +-------------------------------+
-        |                               |
-        v                               v
-Windows Ryzen worker                 Surface worker
-Go + Chrome reale CDP                Go + Chrome reale CDP
 ```
-
-- **Oracle A:** dashboard Bento Box, endpoint MCP, SSE e routing dinamico basato su heartbeat.
-- **Oracle B:** broker MQTT con autenticazione reciproca TLS e ACL per nodo.
-- **Worker locali:** connessioni esclusivamente in uscita, browser Chrome reale via CDP locale e WebSocket locale opzionale.
+┌─────────────────────────────────────────────────────────────────────┐
+│                         CLIENT (omniclient)                          │
+│  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐ │
+│  │  MCP Server │  │  CDP Agent  │  │ Web Agent   │  │ Ops Terraform│ │
+│  │  (mcp_      │  │  (cdp_      │  │ (web_       │  │ (ops_       │ │
+│  │   server.go)│  │   agent.go) │  │  agent.go)  │  │  terraform. │ │
+│  │             │  │             │  │             │  │   go)       │ │
+│  └──────┬──────┘  └──────┬──────┘  └──────┬──────┘  └──────┬──────┘ │
+│         │                │                │                │         │
+│         └────────────────┴────────────────┴────────────────┘         │
+│                              │                                        │
+│                    ┌─────────▼─────────┐                             │
+│                    │  Gateway Client   │                             │
+│                    │  (gateway_        │                             │
+│                    │   client.go)      │                             │
+│                    └─────────┬─────────┘                             │
+│                              │ HTTP/gRPC                            │
+└──────────────────────────────┼───────────────────────────────────────┘
+                               │
+                               ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│                      GATEWAY (node1-gateway)                         │
+│  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐ │
+│  │  FastAPI    │  │  MQTT       │  │  Task       │  │  Policy     │ │
+│  │  (main.py)  │  │  Service    │  │  Store      │  │  Engine     │ │
+│  │             │  │  (mqtt_     │  │  (task_     │  │  (policy_   │ │
+│  │             │  │   service.  │  │   store.py) │  │   engine.   │ │
+│  │             │  │   py)       │  │             │  │   py)       │ │
+│  └──────┬──────┘  └──────┬──────┘  └──────┬──────┘  └──────┬──────┘ │
+│         │                │                │                │         │
+│         └────────────────┴────────────────┴────────────────┘         │
+│                              │                                        │
+│                    ┌─────────▼─────────┐                             │
+│                    │  Browser Runtime  │                             │
+│                    │  (browser_        │                             │
+│                    │   runtime.py)     │                             │
+│                    └───────────────────┘                             │
+│                              │                                        │
+│                    ┌─────────▼─────────┐                             │
+│                    │  Audit Logger     │                             │
+│                    │  (audit.py)       │                             │
+│                    └───────────────────┘                             │
+└─────────────────────────────────────────────────────────────────────┘
+```
 
 ## Componenti
 
-| Percorso | Responsabilita' |
-|---|---|
-| `node1-gateway/` | Gateway FastAPI, dashboard, SSE, bridge MQTT e instradamento MCP |
-| `omniclient/` | Worker Go, browser CDP, snapshot AX tree, click tramite input CDP, MQTT e heartbeat |
-| `docs/` | Documentazione aggiuntiva del progetto |
+### omniclient (Go)
 
-## Flussi principali
+- **mcp_server.go**: Server MCP che espone tool `browser_navigate`, `browser_click`, `browser_type`, `browser_screenshot`, `ops_terraform_plan`, `ops_terraform_apply`
+- **cdp_agent.go**: Agente Chrome DevTools Protocol per automazione browser locale (porta 9222)
+- **web_agent.go**: Agente per navigazione e scraping web
+- **ops_terraform.go**: Esecutore comandi Terraform per operazioni infrastrutturali
+- **gateway_client.go**: Client HTTP/gRPC verso il gateway
+- **mqtt_client.go**: Client MQTT per pub/sub asincrono
+- **ws_server.go**: Server WebSocket per connessioni bidirezionali
+- **heartbeat.go**: Health check periodici verso il gateway
 
-### Browser automation
+### node1-gateway (Python)
 
-1. Il connector chiama `/mcp` sul Gateway.
-2. Il Gateway seleziona un worker da `agent_id -> node_id` e pubblica un task MQTT.
-3. Il worker recupera una `WebSession`, estrae l'Accessibility Tree con CDP e restituisce un testo compatto; i ref sono validi solo fino al prossimo snapshot.
-4. I click usano `Input.dispatchMouseEvent`, non `element.click()`.
+- **main.py**: Applicazione FastAPI con endpoint REST e WebSocket
+- **mqtt_service.py**: Servizio MQTT per messaggistica asincrona task/results
+- **task_store.py**: Store in-memory per task in esecuzione
+- **policy_engine.py**: Motore policy per autorizzazioni e limiti
+- **browser_runtime.py**: Runtime browser remoto con gestione sessioni
+- **audit.py**: Audit logging per tracciabilità operazioni
+- **workspace_manager.py**: Gestione workspace e contesti multi-tenant
 
-### Human-in-the-loop
+## Avvio Rapido
 
-Le operazioni distruttive devono pubblicare `pending_approval`, generare un alert MQTT e attendere una decisione umana della dashboard. Nessun tool deve eseguire shell arbitraria.
+### Prerequisiti
 
-## Avvio locale del worker
+- Go 1.21+
+- Python 3.11+
+- Chrome/Chromium con debug remoto abilitato (`--remote-debugging-port=9222`)
+- Broker MQTT (es. Mosquitto, EMQX)
+- Terraform CLI (per ops_*)
 
-1. Avvia Chrome con debugging locale, ad esempio:
-   ```powershell
-   chrome.exe --remote-debugging-port=9222 --user-data-dir=C:\omninode-chrome
-   ```
-2. Configura le variabili richieste:
-   ```powershell
-   $env:OMNI_WS_TOKEN = "token-lungo-almeno-32-caratteri"
-   $env:OMNI_WS_ORIGINS = "http://127.0.0.1:8080"
-   $env:OMNI_NODE_ID = "ryzen"
-   $env:OMNI_MQTT_BROKER = "tls://oracle-b.plini.net:8883"
-   $env:OMNI_MQTT_CA = "certs/ca.crt"
-   $env:OMNI_MQTT_CERT = "certs/client.crt"
-   $env:OMNI_MQTT_KEY = "certs/client.key"
-   ```
-3. Compila e avvia:
-   ```powershell
-   cd omniclient
-   go mod tidy
-   go build ./...
-   go run .
-   ```
-
-## Avvio Gateway
-
-Sul nodo Oracle A configura `MQTT_BROKER`, `MQTT_CA`, `MQTT_CERT`, `MQTT_KEY`, `MCP_SECRET`, `OMNI_BIND=127.0.0.1` e `OMNI_PORT=8000`, quindi:
+### Build
 
 ```bash
+# omniclient (Go)
+cd omniclient
+go mod download
+go build -o omniclient .
+
+# node1-gateway (Python)
 cd node1-gateway
-python -m venv .venv
-. .venv/bin/activate
+python -m venv venv
+source venv/bin/activate  # Linux/Mac
 pip install -r requirements.txt
-uvicorn main:app --host 127.0.0.1 --port 8000
 ```
 
-Il gateway deve essere esposto tramite Cloudflare Tunnel, non direttamente su Internet. Vedi `ARCHITECTURE.md` e `SECURITY.md`.
+### Configurazione
 
-## Stato e prossimi passi
+**omniclient** (`config.yaml` o env):
+```yaml
+gateway_url: http://localhost:8000
+mqtt_broker: localhost:1883
+cdp_port: 9222
+mcp_port: 8080
+```
 
-Consulta `NEXT_STEPS.md` per checklist di build, test MQTT, configurazione Mosquitto, Cloudflare Access e Step 5 (Ops CLI con approvazione umana).
+**node1-gateway** (`.env`):
+```
+MQTT_BROKER=localhost:1883
+CDP_REMOTE_URL=http://localhost:9222
+AUDIT_LOG_PATH=/var/log/omni/audit.jsonl
+```
+
+### Avvio
+
+```bash
+# Terminal 1: Gateway
+cd node1-gateway
+uvicorn main:app --reload --port 8000
+
+# Terminal 2: Chrome con CDP
+google-chrome --remote-debugging-port=9222
+
+# Terminal 3: omniclient
+cd omniclient
+./omniclient
+```
+
+### Verifica
+
+```bash
+# Test MCP server
+curl http://localhost:8080/health
+
+# Test gateway
+curl http://localhost:8000/health
+
+# Test MQTT
+mosquitto_sub -t "omni/#" -v
+```
+
+## Documentazione
+
+- [ARCHITECTURE.md](ARCHITECTURE.md) - Topologia dettagliata, flussi, contratti
+- [SECURITY.md](SECURITY.md) - Principi sicurezza, hardening, incident response
+- [BUILD.md](BUILD.md) - Istruzioni build, test, configurazione
+- [NEXT_STEPS.md](NEXT_STEPS.md) - Priorità e checklist sviluppo
+- [ROADMAP.md](ROADMAP.md) - Stato implementazione e backlog
+- [docs/AI_ONBOARDING.md](docs/AI_ONBOARDING.md) - Onboarding per AI assistant
+- [docs/OPERATIONS_RUNBOOK.md](docs/OPERATIONS_RUNBOOK.md) - Runbook operativo
+- [docs/REPOSITORY_MAP.md](docs/REPOSITORY_MAP.md) - Mappa repository
+- [omniclient/README.md](omniclient/README.md) - Setup worker Go
+- [omniclient/MCP_SETUP.md](omniclient/MCP_SETUP.md) - Config MCP per Claude Desktop
+
+## License
+
+MIT

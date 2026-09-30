@@ -1,99 +1,191 @@
-# Architettura Omninode
+# Architettura OmniNode
 
 ## Topologia
 
-```text
-MCP connector / LLM
-  | HTTPS JSON-RPC
-  v
-Cloudflare Access + Tunnel (plini.net)
-  |
-  v
-Oracle A: FastAPI Gateway
-  |-- /                 Dashboard Bento Box (SSE)
-  |-- /api/v1/stream    Event stream dashboard
-  |-- /api/v1/approve   Decisione human-in-the-loop
-  `-- /mcp              Ingresso MCP
-  |
-  | MQTT mTLS (TCP 8883)
-  v
-Oracle B: Mosquitto
-  |
-  +-- omninode/nodes/{node}/cmd/{task}
-  +-- omninode/nodes/{node}/result/{task}
-  +-- omninode/nodes/{node}/heartbeat
-  +-- omninode/alerts/approval
-  `-- omninode/approvals/in
-  |
-  v
-Worker Go locali (Ryzen / Surface)
-  |-- Chrome reale via CDP su 127.0.0.1:9222
-  |-- Playwright-Go + CDP raw
-  `-- WebSocket locale opzionale su 127.0.0.1:8080
+OmniNode adotta un'architettura client-gateway distribuita con separazione delle responsabilità:
+
+```
+┌──────────────────────────────────────────────────────────────────────┐
+│                           CLIENT LAYER                                │
+│  ┌────────────────────────────────────────────────────────────────┐  │
+│  │                    omniclient (Go)                              │  │
+│  │  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐          │  │
+│  │  │  MCP Server  │  │  CDP Agent   │  │  Web Agent   │          │  │
+│  │  │  :8080       │  │  :9222       │  │  HTTP        │          │  │
+│  │  └──────┬───────┘  └──────┬───────┘  └──────┬───────┘          │  │
+│  │         │                 │                  │                   │  │
+│  │         └─────────────────┴──────────────────┘                   │  │
+│  │                           │                                       │  │
+│  │                  ┌────────▼────────┐                             │  │
+│  │                  │ Gateway Client  │                             │  │
+│  │                  │ HTTP/gRPC       │                             │  │
+│  │                  └────────┬────────┘                             │  │
+│  │                           │                                       │  │
+│  │                  ┌────────▼────────┐                             │  │
+│  │                  │   MQTT Client   │                             │  │
+│  │                  │   Pub/Sub       │                             │  │
+│  │                  └────────┬────────┘                             │  │
+│  └───────────────────────────┼───────────────────────────────────────┘  │
+│                              │                                           │
+└──────────────────────────────┼───────────────────────────────────────────┘
+                               │
+                               │ HTTP/gRPC + MQTT
+                               │
+┌──────────────────────────────▼───────────────────────────────────────────┐
+│                          GATEWAY LAYER                                    │
+│  ┌────────────────────────────────────────────────────────────────────┐  │
+│  │                   node1-gateway (Python/FastAPI)                    │  │
+│  │  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐             │  │
+│  │  │  FastAPI     │  │  MQTT Service │  │  Task Store  │             │  │
+│  │  │  :8000       │  │  :1883        │  │  In-Memory  │             │  │
+│  │  └──────┬───────┘  └──────┬───────┘  └──────┬───────┘             │  │
+│  │         │                 │                  │                      │  │
+│  │         └─────────────────┴──────────────────┘                      │  │
+│  │                           │                                         │  │
+│  │         ┌─────────────────┴──────────────────┐                      │  │
+│  │         │                                     │                     │  │
+│  │  ┌──────▼───────┐                    ┌───────▼────────┐            │  │
+│  │  │ Policy       │                    │  Browser       │            │  │
+│  │  │ Engine       │                    │  Runtime       │            │  │
+│  │  └──────┬───────┘                    └───────┬────────┘            │  │
+│  │         │                                     │                     │  │
+│  │         └─────────────────┬───────────────────┘                     │  │
+│  │                           │                                         │  │
+│  │                  ┌────────▼────────┐                               │  │
+│  │                  │   Audit Logger  │                               │  │
+│  │                  │   JSONL         │                               │  │
+│  │                  └─────────────────┘                               │  │
+│  └────────────────────────────────────────────────────────────────────┘  │
+└──────────────────────────────────────────────────────────────────────────┘
 ```
 
-## Gateway
+## Flussi Principali
 
-`node1-gateway/main.py` mantiene in memoria:
+### 1. Navigazione Browser (browser_navigate)
 
-- `active_nodes`: stato ricavato dagli heartbeat.
-- `agent_routing`: mappa agente -> nodo, ricavata da `supported_agents` nell'heartbeat.
-- `pending_mcp_requests`: Future in attesa di un risultato MQTT.
-- `sse_clients`: code asincrone per dashboard connesse.
+```
+Client (MCP) → mcp_server.go → cdp_agent.go → Chrome CDP (:9222)
+                    ↓
+              gateway_client.go → HTTP POST /browser/navigate
+                    ↓
+              node1-gateway → mqtt_service.py → topic: omni/browser/request
+                    ↓
+              browser_runtime.py → esegue navigazione
+                    ↓
+              mqtt_service.py → topic: omni/browser/result
+                    ↓
+              gateway_client.go → mcp_server.go → MCP Client
+```
 
-Il Gateway inoltra alert di approvazione e aggiornamenti nodi ai browser tramite Server-Sent Events.
-
-## Worker
-
-Il worker usa Chrome reale avviato localmente con remote debugging CDP. La sessione browser di default e' deliberatamente collegata al profilo Chrome reale quando occorrono sessioni utente esistenti. L'isolamento per agente non e' attivo di default: gli agenti devono quindi usare tab/sessioni separate e il worker deve serializzare le operazioni concorrenti sulla stessa sessione.
-
-### Browser control
-
-- `Accessibility.getFullAXTree` produce la base del snapshot.
-- Gli elementi interattivi ricevono ref numerici temporanei, associati a `backendDOMNodeId`.
-- `DOM.scrollIntoViewIfNeeded`, `DOM.getContentQuads` e `Input.dispatchMouseEvent` sono usati per il click.
-- I ref vanno considerati invalidi dopo un nuovo snapshot o un re-render SPA.
-
-## Contratti MQTT
-
-### Command
-
-Topic: `omninode/nodes/{node_id}/cmd/{task_id}`
-
+**Contratto MQTT**:
 ```json
-{"task_id":"...","agent_id":"agent_1","action":"web_snapshot","ref":null}
+{
+  "task_id": "uuid4",
+  "action": "navigate",
+  "url": "https://example.com",
+  "timeout_ms": 30000,
+  "workspace_id": "default"
+}
 ```
 
-### Result
+### 2. Operazioni Terraform (ops_terraform_plan)
 
-Topic: `omninode/nodes/{node_id}/result/{task_id}`
+```
+Client (MCP) → mcp_server.go → ops_terraform.go → terraform CLI
+                    ↓
+              ops_terraform.go → exec.Command("terraform", "plan")
+                    ↓
+              mcp_server.go → MCP Client (stdout/stderr)
+```
 
+**Contratto**:
 ```json
-{"task_id":"...","status":"success","output":"..."}
+{
+  "command": "plan",
+  "directory": "/path/to/infra",
+  "vars": {"environment": "prod"},
+  "timeout_seconds": 300
+}
 ```
 
-### Heartbeat
+### 3. Heartbeat e Health Check
 
-Topic: `omninode/nodes/{node_id}/heartbeat`
-
-```json
-{"node_id":"ryzen","status":"online","supported_agents":["agent_1","devops_bot"],"timestamp":"2026-09-30T10:00:00Z"}
+```
+omniclient → heartbeat.go → HTTP GET /health (gateway)
+                    ↓
+              gateway → 200 OK + metadata
+                    ↓
+              heartbeat.go → log + retry (max 3 tentativi)
 ```
 
-### Approval
+## Contratti API
 
-- Alert: `omninode/alerts/approval`
-- Decisione: `omninode/approvals/in`
+### MCP Tools (omniclient)
 
-I payload devono contenere almeno `task_id`, `agent_id`, descrizione dell'operazione e decisione/risultato.
+| Tool | Input | Output | Descrizione |
+|------|-------|--------|-------------|
+| `browser_navigate` | `{url: string}` | `{success: bool, title: string}` | Naviga a URL |
+| `browser_click` | `{selector: string}` | `{success: bool}` | Click elemento |
+| `browser_type` | `{selector: string, text: string}` | `{success: bool}` | Digita testo |
+| `browser_screenshot` | `{full_page: bool}` | `{screenshot: base64}` | Screenshot |
+| `ops_terraform_plan` | `{directory: string, vars: object}` | `{output: string}` | Terraform plan |
+| `ops_terraform_apply` | `{directory: string, vars: object}` | `{output: string}` | Terraform apply |
 
-## MCP
+### Gateway REST API
 
-Il Gateway espone `/mcp` via HTTPS. Il trasporto previsto e' JSON-RPC/Streamable HTTP; il codice corrente contiene una base MCP e deve essere validato con il connector specifico prima dell'uso. L'autenticazione applicativa usa un Bearer token (`MCP_SECRET`) dietro Cloudflare Access.
+| Endpoint | Metodo | Descrizione |
+|----------|--------|-------------|
+| `/health` | GET | Health check gateway |
+| `/browser/navigate` | POST | Richiesta navigazione browser |
+| `/browser/screenshot` | POST | Richiesta screenshot |
+| `/task/{task_id}/status` | GET | Stato task |
+| `/audit/logs` | GET | Log audit (admin) |
 
-## Limitazioni note
+### MQTT Topics
 
-- Il codice CDP/Playwright-Go deve essere compilato contro la versione effettiva del modulo prima del deploy.
-- Il worker MQTT definitivo (`mqtt_client.go`) e l'handler delle approvazioni ops devono essere verificati/integrati prima del deployment di produzione.
-- Gli state store del gateway sono in memoria: un riavvio perde routing, richieste pendenti e SSE; gli heartbeat ripopolano il routing. Per task di approvazione serve persistenza (SQLite/Postgres) nello Step 5.
-- Il Gateway non deve usare fallback silenziosi su un nodo: se non esiste routing vivo per l'agente, deve restituire un errore esplicito.
+| Topic | Direzione | Payload |
+|-------|-----------|---------|
+| `omni/browser/request` | client→gateway | Task browser |
+| `omni/browser/result` | gateway→client | Result browser |
+| `omni/ops/request` | client→gateway | Task ops |
+| `omni/ops/result` | gateway→client | Result ops |
+| `omni/heartbeat` | client→gateway | Heartbeat |
+
+## Limitazioni
+
+### Performance
+
+- **CDP locale**: Chrome deve essere eseguito con `--remote-debugging-port=9222`
+- **MQTT**: Latenza tipica <100ms per messaggi piccoli (<10KB)
+- **HTTP/gRPC**: Timeout default 30s per richieste sincrone
+
+### Sicurezza
+
+- **Nessuna autenticazione** abilitata di default (da configurare in produzione)
+- **CDP** esposto su localhost:9222 (firewall richiesto)
+- **MQTT** senza TLS di default (abilitare `mqtts://` in produzione)
+
+### Scalabilità
+
+- **Task store**: In-memory, non persistente (max ~1000 task concorrenti)
+- **Browser runtime**: Single-instance (no multi-sessione parallela)
+- **Gateway**: Single-node (no clustering nativo)
+
+## Dipendenze Critiche
+
+| Componente | Dipendenza | Versione Min | Criticità |
+|------------|------------|--------------|-----------|
+| omniclient | Go | 1.21 | Alta |
+| omniclient | Chrome CDP | 114+ | Alta |
+| node1-gateway | Python | 3.11 | Alta |
+| node1-gateway | FastAPI | 0.100+ | Media |
+| node1-gateway | paho-mqtt | 1.6+ | Media |
+| ops_terraform | Terraform CLI | 1.5+ | Alta |
+
+## Invarianti
+
+1. **CDP sempre disponibile**: Chrome deve essere raggiungibile su localhost:9222
+2. **MQTT broker attivo**: Gateway e client devono connettersi allo stesso broker
+3. **Task ID univoci**: UUID v4 per ogni task, mai riutilizzare
+4. **Audit immutabile**: Log audit sono append-only, mai modificare/eliminare
+5. **Policy enforcement**: Ogni richiesta browser passa dal policy engine

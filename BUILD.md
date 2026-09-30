@@ -1,77 +1,194 @@
-# Build del Worker Go (Omninode)
-
-Questo documento descrive come compilare il worker `omniclient.exe` per i due target hardware:
-
-- **Desktop Ryzen:** Windows AMD64
-- **Surface Pro 11:** Windows ARM64
+# Build - OmniNode
 
 ## Prerequisiti
 
-- Go 1.21 o superiore installato e nel PATH.
-- Accesso a internet per scaricare le dipendenze Go.
-- PowerShell o terminale Windows con permessi di scrittura nella cartella `omniclient/`.
+### Sistema Operativo
 
-## Passo 1: Prepara il modulo Go
+- **Linux**: Ubuntu 22.04+, Debian 12+, RHEL 9+
+- **macOS**: 13+ (Ventura o superiore)
+- **Windows**: 11 (WSL2 consigliato)
 
-```powershell
+### Dipendenze
+
+| Software | Versione | Installazione (Ubuntu) |
+|----------|----------|------------------------|
+| Go | 1.21+ | `sudo apt install golang-go` |
+| Python | 3.11+ | `sudo apt install python3.11 python3.11-venv` |
+| Chrome | 114+ | `wget https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb` |
+| Git | 2.30+ | `sudo apt install git` |
+| Make | 4.0+ | `sudo apt install make` |
+| Docker | 24+ (opzionale) | `sudo apt install docker.io` |
+
+### Dipendenze Opzionali
+
+| Software | Scopo | Installazione |
+|----------|-------|---------------|
+| Mosquitto | Broker MQTT locale | `sudo apt install mosquitto` |
+| Terraform | Testing ops_* | `wget https://releases.hashicorp.com/terraform/1.6.0/terraform_1.6.0_linux_amd64.zip` |
+| protoc | Compilazione proto (futuro) | `sudo apt install protobuf-compiler` |
+
+## Build omniclient (Go)
+
+### 1. Download Dipendenze
+
+```bash
 cd omniclient
-go mod tidy
+go mod download
 ```
 
-## Passo 2: Installa le dipendenze
+### 2. Build Binario
 
-```powershell
-go get github.com/eclipse/paho.mqtt.golang
-go get modernc.org/sqlite
-go get github.com/playwright-community/playwright-go
-go get github.com/gorilla/websocket
+```bash
+# Build standard
+go build -o omniclient .
+
+# Build ottimizzato per produzione
+go build -ldflags="-s -w" -o omniclient .
+
+# Build con debug symbols
+go build -gcflags="all=-N -l" -o omniclient .
 ```
 
-**Nota:** `modernc.org/sqlite` e' un driver SQLite puro Go, compatibile con `CGO_ENABLED=0` e Windows ARM.
+### 3. Verifica
 
-## Passo 3: Build per Ryzen (AMD64)
+```bash
+# Versione Go
+go version
 
-```powershell
-$env:CGO_ENABLED = "0"
-$env:GOOS = "windows"
-$env:GOARCH = "amd64"
-go build -o omniclient-ryzen.exe .
+# Test unitari
+go test -v ./...
+
+# Test con coverage
+go test -coverprofile=coverage.out ./...
+go tool cover -html=coverage.out
 ```
 
-## Passo 4: Build per Surface Pro 11 (ARM64)
+### 4. Cross-Compilation
 
-```powershell
-$env:CGO_ENABLED = "0"
-$env:GOOS = "windows"
-$env:GOARCH = "arm64"
-go build -o omniclient-surface.exe .
+```bash
+# Linux AMD64
+GOOS=linux GOARCH=amd64 go build -o omniclient-linux-amd64 .
+
+# macOS ARM64
+GOOS=darwin GOARCH=arm64 go build -o omniclient-darwin-arm64 .
+
+# Windows AMD64
+GOOS=windows GOARCH=amd64 go build -o omniclient-windows-amd64.exe .
 ```
 
-## Passo 5: Deploy
+## Build node1-gateway (Python)
 
-1. Copia l'eseguibile appropriato (`omniclient-ryzen.exe` o `omniclient-surface.exe`) nella directory di destinazione.
-2. Crea una cartella `certs/` con `ca.crt`, `client.crt`, `client.key` (generati da Mosquitto).
-3. Imposta le variabili d'ambiente richieste:
-   ```powershell
-   $env:OMNI_WS_TOKEN = "token-lungo-almeno-32-caratteri"
-   $env:OMNI_WS_ORIGINS = "http://127.0.0.1:8080"
-   $env:OMNI_NODE_ID = "ryzen"  # o "surface"
-   $env:OMNI_MQTT_BROKER = "tls://oracle-b.plini.net:8883"
-   $env:OMNI_MQTT_CA = "certs/ca.crt"
-   $env:OMNI_MQTT_CERT = "certs/client.crt"
-   $env:OMNI_MQTT_KEY = "certs/client.key"
-   ```
-4. Avvia Chrome con debugging locale:
-   ```powershell
-   chrome.exe --remote-debugging-port=9222 --user-data-dir=C:\omninode-chrome
-   ```
-5. Esegui il worker:
-   ```powershell
-   .\omniclient-ryzen.exe
-   ```
+### 1. Virtual Environment
 
-## Risoluzione problemi
+```bash
+cd node1-gateway
+python3.11 -m venv venv
+source venv/bin/activate  # Linux/Mac
+```
 
-- **Errore `playwright-go`:** verifica di usare v0.4201.1 o superiore. Esegui `go mod tidy` e riprova.
-- **Errore SQLite:** assicurati che `CGO_ENABLED=0` sia impostato prima della build.
-- **Errore MQTT mTLS:** controlla percorsi e permessi dei certificati in `certs/`.
+### 2. Install Dipendenze
+
+```bash
+pip install --upgrade pip
+pip install -r requirements.txt
+```
+
+### 3. Verifica
+
+```bash
+python --version
+pytest -v
+pytest --cov=. --cov-report=term-missing
+```
+
+## Configurazione
+
+### omniclient (config.yaml)
+
+```yaml
+gateway_url: http://localhost:8000
+mqtt_broker: localhost:1883
+cdp_port: 9222
+mcp_port: 8080
+log_level: info
+```
+
+### node1-gateway (.env)
+
+```
+BIND_HOST=127.0.0.1
+BIND_PORT=8000
+MQTT_BROKER=localhost:1883
+AUDIT_LOG_PATH=/var/log/omni/audit.jsonl
+POLICY_ENFORCE=true
+LOG_LEVEL=info
+```
+
+## Test
+
+### omniclient
+
+```bash
+cd omniclient
+go test -v ./...
+go test -race ./...
+```
+
+### node1-gateway
+
+```bash
+cd node1-gateway
+source venv/bin/activate
+pytest -v
+pytest --cov=. --cov-report=term-missing
+```
+
+## Deployment
+
+### Sviluppo Locale
+
+```bash
+# Terminal 1: Mosquitto
+mosquitto -c /etc/mosquitto/mosquitto.conf
+
+# Terminal 2: Chrome
+google-chrome --remote-debugging-port=9222
+
+# Terminal 3: Gateway
+cd node1-gateway && uvicorn main:app --reload --port 8000
+
+# Terminal 4: omniclient
+cd omniclient && ./omniclient
+```
+
+## Troubleshooting
+
+**Go: "module not found"**
+```bash
+go clean -modcache && go mod download
+```
+
+**Chrome: "Cannot connect to CDP"**
+```bash
+curl http://localhost:9222/json/version
+pkill chrome && google-chrome --remote-debugging-port=9222
+```
+
+**MQTT: "Connection refused"**
+```bash
+systemctl status mosquitto
+mosquitto_sub -u omniclient -P ${MQTT_PASSWORD} -t "omni/#" -v
+```
+
+## Release
+
+```bash
+git tag -a v1.2.3 -m "Release v1.2.3"
+git push origin v1.2.3
+```
+
+## Risorse
+
+- [Go Documentation](https://go.dev/doc/)
+- [FastAPI Docs](https://fastapi.tiangolo.com/)
+- [Chrome DevTools Protocol](https://chromedevtools.github.io/devtools-protocol/)

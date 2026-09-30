@@ -1,70 +1,199 @@
-# Prossimi passi
+# Next Steps - OmniNode
 
-## Prima del deploy
+## Priorità Alta (Q4 2024)
 
-- [ ] Eseguire `go mod tidy` e `go build ./...` in `omniclient/`.
-- [ ] Correggere eventuali incompatibilita' API di `playwright-go` emerse in compilazione.
-- [ ] Verificare che `mqtt_client.go` sia presente, compili e gestisca `web_snapshot`/`web_click` con il formato MQTT documentato.
-- [ ] Eseguire `pip install -r node1-gateway/requirements.txt` in un virtualenv Python.
-- [ ] Controllare che `aiomqtt` sia elencato in `requirements.txt`.
-- [ ] Rimuovere tutti i segreti e valori predefiniti dalle variabili di ambiente e dai file `.env` committati.
+### 1. Autenticazione e Autorizzazione MCP
 
-## Mosquitto (Oracle B)
+**Stato**: ❌ Non implementato
+**Sforzo**: 3-5 giorni
+**Impatto**: Critico per produzione
 
-- [ ] Creare CA privata, certificato server e un certificato client distinto per ciascun worker e gateway.
-- [ ] Abilitare listener TLS sulla porta 8883 e `require_certificate true`.
-- [ ] Disabilitare listener anonimi e usare ACL MQTT minime per gateway e worker.
-- [ ] Consentire ai worker solo subscribe sui propri `cmd/+` e publish sui propri `result/+` e `heartbeat`.
-- [ ] Consentire al gateway publish sui comandi/approvazioni e subscribe ai risultati, heartbeat e alert.
+**Checklist**:
+- [ ] Implementare middleware auth su mcp_server.go (JWT o API key)
+- [ ] Aggiungere config `mcp_auth_token` in config.yaml
+- [ ] Testare con MCP client (Claude Desktop, Cline)
+- [ ] Documentare in MCP_SETUP.md
 
-## Gateway e Cloudflare
+**Criteri di Accettazione**:
+- MCP server rifiuta richieste senza token valido
+- Token configurabile via env var
+- Log audit per tentativi falliti
 
-- [ ] Configurare `MCP_SECRET` lungo e non committato.
-- [ ] Configurare `MQTT_BROKER`, `MQTT_CA`, `MQTT_CERT`, `MQTT_KEY` e bind loopback.
-- [ ] Installare Cloudflare Tunnel su Oracle A e instradare `plini.net` verso `http://127.0.0.1:8000`.
-- [ ] Applicare Cloudflare Access interattivo per dashboard e policy M2M separata per `/mcp`.
-- [ ] Verificare che gli header Service Token di Cloudflare e il Bearer applicativo siano supportati dal connector MCP scelto.
-- [ ] Testare SSE da rete mobile dopo login Access.
+### 2. Persistenza Task Store
 
-## Worker locali
+**Stato**: ❌ Non implementato (in-memory only)
+**Sforzo**: 5-7 giorni
+**Impatto**: Alto (recupero dopo restart)
 
-- [ ] Avviare Chrome con profilo dedicato e CDP su loopback.
-- [ ] Creare `certs/ca.crt`, `certs/client.crt`, `certs/client.key` con permessi stretti.
-- [ ] Impostare `OMNI_WS_TOKEN` e `OMNI_WS_ORIGINS` senza inserirli nel repository.
-- [ ] Configurare `OMNI_NODE_ID`, URL broker MQTT e percorsi certificati.
-- [ ] Verificare heartbeat immediato e poi ogni 30 secondi.
-- [ ] Verificare che un worker offline non resti visibile indefinitamente nella dashboard.
+**Checklist**:
+- [ ] Scegliere backend (SQLite, PostgreSQL, Redis)
+- [ ] Implementare interfaccia TaskStore (save, load, update, delete)
+- [ ] Migrare task_store.py da in-memory a persistente
+- [ ] Testare recovery dopo crash gateway
+- [ ] Backup automatico (cron o systemd timer)
 
-## Test di accettazione
+**Criteri di Accettazione**:
+- Task sopravvivono a restart gateway
+- Query per stato task (pending, completed, failed)
+- Cleanup automatico task > 30 giorni
 
-1. **Build worker:** `go build ./...` deve completare senza errori.
-2. **mTLS MQTT:** il worker si connette a Mosquitto con certificato valido; un certificato non autorizzato viene rifiutato.
-3. **Heartbeat:** `ryzen` e/o `surface` compaiono nella dashboard e il timestamp si aggiorna.
-4. **Routing:** un task per `agent_id` supportato arriva solo al nodo pubblicato nell'heartbeat.
-5. **Browser:** `web_snapshot` restituisce un snapshot e `web_click` rifiuta ref scaduti.
-6. **SSE:** un messaggio su `omninode/alerts/approval` compare in dashboard senza refresh.
-7. **Approval:** la dashboard pubblica una sola decisione valida; il worker scaduto rifiuta decisioni tardive.
-8. **Access:** `/` richiede login umano; `/mcp` rifiuta richieste senza autenticazione prevista.
+### 3. TLS per MQTT e HTTP
 
-## Step successivi
+**Stato**: ❌ Non implementato (plaintext)
+**Sforzo**: 2-3 giorni
+**Impatto**: Critico per sicurezza
 
-### Step 5: Ops CLI Human-in-the-loop
+**Checklist**:
+- [ ] Generare certificati TLS (openssl o Let's Encrypt)
+- [ ] Configurare Mosquitto per mqtts://8883
+- [ ] Aggiornare mqtt_client.go per TLS
+- [ ] Aggiornare mqtt_service.py per TLS
+- [ ] Configurare reverse proxy (nginx) per HTTPS gateway
+- [ ] Testare connessioni sicure
 
-Implementare tool allowlisted `ops.terraform` e `ops.oci` con:
+**Criteri di Accettazione**:
+- MQTT solo su mqtts:// (porta 1883 bloccata)
+- HTTPS su gateway (porta 443)
+- Certificati validi (non self-signed in produzione)
 
-- argomenti strutturati e validazione rigida;
-- `exec.Command` con argv separati, mai `sh -c` o `cmd /c`;
-- stato persistente `pending_approval`;
-- alert SSE/MQTT;
-- approvazione o rifiuto con TTL;
-- audit append-only;
-- risultati e log con dimensione massima.
+## Priorità Media (Q1 2025)
 
-### Hardening produzione
+### 4. Multi-Sessione Browser
 
-- [ ] Persistenza task/routing/audit (Postgres o SQLite con backup).
-- [ ] Rate limit su `/mcp`, `/api/v1/approve` e SSE.
-- [ ] Scadenza nodi basata su heartbeat (es. offline dopo 90 secondi).
-- [ ] Limite e backpressure sulle code SSE.
-- [ ] CORS/CSRF per endpoint dashboard e approvazione.
-- [ ] Osservabilita': metriche, alert e rotazione log.
+**Stato**: ❌ Single-instance
+**Sforzo**: 7-10 giorni
+**Impatto**: Alto (scalabilità)
+
+**Checklist**:
+- [ ] Implementare BrowserSession class in browser_runtime.py
+- [ ] Gestire multiple istanze Chrome (porte CDP dinamiche)
+- [ ] Session isolation (cookie, localStorage, cache)
+- [ ] Limiti per workspace (max sessioni concurrenti)
+- [ ] Cleanup sessioni idle (timeout 30 min)
+
+**Criteri di Accettazione**:
+- 5+ sessioni browser concurrenti
+- Isolamento completo tra sessioni
+- Memory usage < 2GB per 5 sessioni
+
+### 5. Monitoring e Alerting
+
+**Stato**: ❌ Non implementato
+**Sforzo**: 3-5 giorni
+**Impatto**: Medio (observability)
+
+**Checklist**:
+- [ ] Integrare Prometheus metrics (go_prometheus_client)
+- [ ] Esportare metrics: request_count, latency, error_rate
+- [ ] Dashboard Grafana (template JSON)
+- [ ] Alert: error_rate > 5%, latency_p99 > 5s
+- [ ] Log aggregation (Loki o ELK)
+
+**Criteri di Accettazione**:
+- Dashboard con metrics real-time
+- Alert su Slack/PagerDuty
+- Log queryabili per task_id, workspace_id
+
+### 6. Rate Limiting e Quotas
+
+**Stato**: ❌ Non implementato
+**Sforzo**: 2-3 giorni
+**Impatto**: Medio (fairness, costi)
+
+**Checklist**:
+- [ ] Implementare rate limiter (token bucket) in policy_engine.py
+- [ ] Config per workspace: requests_per_minute, requests_per_day
+- [ ] Quota browser: minutes_per_day, screenshots_per_day
+- [ ] Response 429 Too Many Requests con Retry-After header
+- [ ] Metrics per quota usage
+
+**Criteri di Accettazione**:
+- Rate limiting funzionante a 10 req/min default
+- Quota enforcement per workspace
+- Alert quando quota > 80%
+
+## Priorità Bassa (Q2 2025)
+
+### 7. Plugin System
+
+**Stato**: ❌ Non implementato
+**Sforzo**: 10-14 giorni
+**Impatto**: Medio (extensibility)
+
+**Checklist**:
+- [ ] Definire interfaccia Plugin (Python: ABC, Go: interface)
+- [ ] Implementare loader dinamico (importlib, plugin pkg)
+- [ ] Sandbox plugin (seccomp, gVisor)
+- [ ] Registry plugin (git submodule o marketplace)
+- [ ] Documentare SDK per sviluppatori
+
+**Criteri di Accettazione**:
+- Plugin example funzionante (es. browser extension)
+- Isolamento sicurezza (plugin non può accedere a file system)
+- Hot reload plugin (senza restart gateway)
+
+### 8. GraphQL API
+
+**Stato**: ❌ Non implementato (solo REST + MQTT)
+**Sforzo**: 5-7 giorni
+**Impatto**: Basso (developer experience)
+
+**Checklist**:
+- [ ] Integrare Strawberry (Python) o gql (Go)
+- [ ] Definire schema GraphQL (Query, Mutation, Subscription)
+- [ ] Resolver per task, browser, ops
+- [ ] Subscription per task status (real-time)
+- [ ] Documentare con GraphiQL
+
+**Criteri di Accettazione**:
+- Query: `task(id: "uuid") { status, result }`
+- Mutation: `browserNavigate(url: "...") { taskId }`
+- Subscription: `taskStatusChanged(taskId: "...") { status }`
+
+### 9. CLI Tool
+
+**Stato**: ❌ Non implementato
+**Sforzo**: 3-5 giorni
+**Impatto**: Basso (developer experience)
+
+**Checklist**:
+- [ ] Scegliere framework (cobra per Go, click per Python)
+- [ ] Comandi: `omni task list`, `omni browser navigate`, `omni ops plan`
+- [ ] Output: table, JSON, YAML
+- [ ] Auth integration (login, logout, token refresh)
+- [ ] Publish su PyPI e Homebrew
+
+**Criteri di Accettazione**:
+- CLI funzionale per operazioni comuni
+- Documentazione help (`omni --help`)
+- CI/CD per release automatiche
+
+## Backlog (Futuro)
+
+- [ ] Supporto WebSocket per MCP (oltre HTTP)
+- [ ] Integration con Kubernetes (operator CRD)
+- [ ] UI dashboard (React + Tailwind)
+- [ ] Supporto Firefox (oltre Chrome CDP)
+- [ ] Distributed tracing (OpenTelemetry)
+- [ ] gRPC per comunicazione client-gateway
+- [ ] Caching layer (Redis) per screenshot e DOM
+- [ ] ML-based anomaly detection (audit logs)
+
+## Dipendenze Critiche
+
+| Task | Dipende da | Bloccante |
+|------|------------|-----------|
+| Autenticazione MCP | - | No |
+| Persistenza Task Store | - | No |
+| TLS per MQTT | - | No |
+| Multi-Sessione | Persistenza Task Store | Sì |
+| Monitoring | TLS | No |
+| Rate Limiting | Autenticazione | No |
+
+## Milestone
+
+| Milestone | Data Target | Task Inclusi |
+|-----------|-------------|--------------|
+| M1: Security Hardening | 2024-12-31 | Auth MCP, TLS MQTT/HTTP |
+| M2: Production Ready | 2025-03-31 | Persistenza, Multi-Sessione, Monitoring |
+| M3: Scale | 2025-06-30 | Rate Limiting, Plugin System, CLI |

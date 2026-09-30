@@ -19,7 +19,13 @@ var upgrader = websocket.Upgrader{
 
 type WSMessage struct {
 	Action  string `json:"action"`
-	Command string `json:"command"`
+	Command string `json:"command,omitempty"`
+	AgentID string `json:"agent_id,omitempty"`
+	X       int    `json:"x,omitempty"`
+	Y       int    `json:"y,omitempty"`
+	Click   string `json:"click,omitempty"`
+	Text    string `json:"text,omitempty"`
+	Key     string `json:"key,omitempty"`
 }
 
 type WSResponse struct {
@@ -47,6 +53,21 @@ func handleWebSocket(w http.ResponseWriter, r *http.Request) {
 
 		var req WSMessage
 		if err := json.Unmarshal(msg, &req); err != nil {
+			continue
+		}
+
+		if req.Action == "web_snapshot" {
+			out, err := SnapshotState()
+			resp := WSResponse{
+				Status: "success",
+				Output: out,
+			}
+			if err != nil {
+				resp.Status = "error"
+				resp.Error = err.Error()
+			}
+			respJSON, _ := json.Marshal(resp)
+			c.WriteMessage(websocket.TextMessage, respJSON)
 			continue
 		}
 

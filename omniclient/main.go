@@ -6,7 +6,7 @@ import (
 	"os"
 	"time"
 
-	mqtt "github.com/eclipse/paho.mqtt.golang"
+	"github.com/ZooL-OhKi/omninode/omniclient/mqttclient"
 )
 
 func main() {
@@ -14,32 +14,29 @@ func main() {
 	flag.Parse()
 
 	if *mcpFlag {
-		fmt.Fprintln(os.Stderr, "[OmniClient] Starting MCP stdio worker...")
-		select {}
+		// Modalità MCP stdio: avvia il server MCP per agenti IA
+		fmt.Fprintln(os.Stderr, "[OmniClient] Starting MCP stdio server...")
+		if err := NewOmninodeServer().StartMCPStdio(); err != nil {
+			fmt.Fprintf(os.Stderr, "[OmniClient] MCP stdio error: %v\n", err)
+			os.Exit(1)
+		}
 	} else {
-		fmt.Println("[OmniClient] Running in standard background worker mode...")
+		// Modalità worker headless con heartbeat MQTT
+		fmt.Fprintln(os.Stderr, "[OmniClient] Starting background worker with MQTT heartbeat...")
 
-		// Configurazione del client MQTT verso il broker locale
-		opts := mqtt.NewClientOptions()
-		opts.AddBroker("tcp://127.0.0.1:1883")
-		opts.SetClientID("omniclient-node-local")
-
-		client := mqtt.NewClient(opts)
-		if token := client.Connect(); token.Wait() && token.Error() != nil {
-			fmt.Printf("[OmniClient] Errore connessione MQTT: %v\n", token.Error())
-			return
+		// Inizializzazione heartbeat MQTT
+		hbService, err := mqttclient.InitHeartbeat("tcp://127.0.0.1:1883", "node-local")
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "[OmniClient] Errore inizializzazione MQTT: %v\n", err)
+			os.Exit(1)
 		}
-		defer client.Disconnect(250)
+		defer hbService.Stop()
 
-		fmt.Println("[OmniClient] Connesso al broker MQTT. Invio heartbeat in corso...")
+		hbService.Start(5 * time.Second)
 
-		// Loop di invio heartbeat ogni 5 secondi
-		for {
-			payload := `{"status": "online", "node": "node-local", "timestamp": "` + time.Now().Format(time.RFC3339) + `"}`
-			token := client.Publish("omninode/nodes/node-local/heartbeat", 0, false, payload)
-			token.Wait()
+		fmt.Fprintln(os.Stderr, "[OmniClient] Connected to MQTT broker. Sending heartbeat every 5 seconds...")
 
-			time.Sleep(5 * time.Second)
-		}
+		// Mantieni il processo in esecuzione
+		select {}
 	}
 }

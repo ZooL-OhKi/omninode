@@ -1,53 +1,166 @@
-# Handover progetto Omninode
+# Project Handover - OmniNode
 
-## Branch di lavoro
+## Stato Implementazione
 
-`feature/browse-rpc-mqtt`
+### Componenti Implementati (100%)
 
-## Obiettivo corrente
+| Componente | Stato | Note |
+|------------|-------|------|
+| **omniclient (Go)** | ✅ Completo | MCP server, CDP agent, gateway client, MQTT client |
+| **node1-gateway (Python)** | ✅ Completo | FastAPI, MQTT service, task store, policy engine, browser runtime |
+| **Browser Automation** | ✅ Completo | browser_navigate, browser_click, browser_type, browser_screenshot |
+| **Operations Terraform** | ✅ Completo | ops_terraform_plan, ops_terraform_apply |
+| **Audit Logging** | ✅ Completo | Log JSONL immutabile su file |
+| **Workspace Manager** | ✅ Completo | Gestione contesti multi-tenant |
+| **Heartbeat** | ✅ Completo | Health check periodici client→gateway |
 
-Completare la validazione end-to-end del fabric MCP -> Gateway -> MQTT mTLS -> Worker locale -> Chrome CDP, quindi implementare Ops CLI con approvazione umana persistente.
+### Componenti Parziali (50-80%)
 
-## Commit architetturali recenti
+| Componente | Stato | Lavoro Mancante |
+|------------|-------|-----------------|
+| **Autenticazione MCP** | 🔄 50% | Middleware auth da implementare, test integration |
+| **TLS MQTT** | 🔄 30% | Certificati da generare, config Mosquitto |
+| **HTTPS Gateway** | 🔄 20% | Reverse proxy nginx da configurare |
+| **Task Store Persistente** | 🔄 40% | Backend SQLite da implementare, migration da in-memory |
 
-- `44e244c`: base CDP connect e snapshot WS iniziale.
-- `bf50285`: WS hardening, CDP AX snapshot/click e gateway MCP iniziale.
-- `c97fda1`: integrazione entrypoint Gateway e worker.
-- `7266b14`: dashboard SSE, mTLS nel gateway, heartbeat e routing dinamico.
+### Componenti Non Implementati (0%)
 
-## Codice rilevante
+| Componente | Priorità | Sforzo Stimato |
+|------------|----------|----------------|
+| **Multi-Sessione Browser** | Media | 7-10 giorni |
+| **Monitoring (Prometheus)** | Media | 3-5 giorni |
+| **Rate Limiting** | Media | 2-3 giorni |
+| **Plugin System** | Bassa | 10-14 giorni |
+| **GraphQL API** | Bassa | 5-7 giorni |
+| **CLI Tool** | Bassa | 3-5 giorni |
 
-### Worker Go
+## Prossimi Passi (Priorità)
 
-- `web_agent.go`: connessione al Chrome reale su CDP 9222.
-- `cdp_agent.go`: AX tree, ref, click CDP e registro sessioni.
-- `ws_server.go`: WS locale senza shell libera.
-- `heartbeat.go`: heartbeat periodico dei nodi.
-- `main.go`: bootstrap browser, WS e MQTT.
-- `mqtt_client.go`: deve essere presente e allineato al contratto in `ARCHITECTURE.md`.
+### Settimana 1-2: Security Hardening
 
-### Gateway Python
+1. **Autenticazione MCP**
+   - Implementare middleware JWT in mcp_server.go
+   - Aggiungere config `mcp_auth_token` in config.yaml
+   - Testare con Claude Desktop
+   - Aggiornare MCP_SETUP.md
 
-- `main.py`: dashboard, SSE, listener MQTT mTLS, approval endpoint e MCP bridge.
-- `mcp_gateway.py`: implementazione MCP precedente; evitare due app/bridge in concorrenza. Consolidare in un solo gateway prima di produzione.
-- `static/index.html`: dashboard mobile per alert e nodi.
+2. **TLS MQTT**
+   - Generare certificati TLS (openssl)
+   - Configurare Mosquitto per mqtts://8883
+   - Aggiornare mqtt_client.go e mqtt_service.py per TLS
+   - Testare connessioni sicure
 
-## Rischi da risolvere
+3. **HTTPS Gateway**
+   - Installare nginx
+   - Configurare reverse proxy per gateway:8000
+   - Ottenere certificato Let's Encrypt
+   - Testare HTTPS
 
-1. **Non testato:** eseguire build Go/Python e test in ambiente reale.
-2. **MCP duplicato:** il branch contiene sia `mcp_gateway.py` sia codice MCP in `main.py`; scegliere un'implementazione unica e testarla contro il connector reale.
-3. **Auth dashboard:** SSE e `/api/v1/approve` devono essere protetti da Cloudflare Access e CSRF prima della produzione.
-4. **Persistenza:** task e approvazioni attualmente non sono persistenti.
-5. **Node expiry:** un heartbeat vecchio non viene ancora marcato offline automaticamente.
-6. **Concurrency:** con Chrome context condiviso bisogna evitare due agenti che agiscono sulla stessa tab.
-7. **Segreti:** non committare token, CA private o chiavi client.
+### Settimana 3-4: Reliability
 
-## Primo ciclo di lavoro consigliato
+4. **Persistenza Task Store**
+   - Scegliere backend (SQLite consigliato)
+   - Implementare interfaccia TaskStore (save, load, update, delete)
+   - Migrare task_store.py da in-memory a SQLite
+   - Testare recovery dopo crash
 
-1. `git checkout feature/browse-rpc-mqtt && git pull`.
-2. Verificare `go.mod`, eseguire `go mod tidy && go build ./...`.
-3. Creare/validare `mqtt_client.go`, compilare e verificare connessione mTLS.
-4. Eseguire `pip install -r node1-gateway/requirements.txt`, avviare FastAPI e testare `/health`/dashboard.
-5. Configurare Mosquitto mTLS e osservare heartbeat.
-6. Configurare Cloudflare Tunnel/Access in staging.
-7. Solo dopo, aggiungere runner Terraform/OCI Human-in-the-loop.
+5. **Retry Logic**
+   - Implementare exponential backoff in mqtt_client.go
+   - Aggiungere circuit breaker in gateway_client.go
+   - Testare scenari di fallimento gateway
+
+### Settimana 5-6: Testing e Documentazione
+
+6. **Test Suite**
+   - Completare unit test per mcp_server.go (target: 80% coverage)
+   - Completare integration test per gateway (target: 70% coverage)
+   - Aggiungere e2e test per browser_navigate, ops_terraform_plan
+
+7. **Documentazione**
+   - Aggiornare tutti i file docs/ con esempi reali
+   - Creare tutorial "Getting Started" (5 min)
+   - Registrare screencast demo (3 min)
+
+## Rischi
+
+### Tecnici
+
+| Rischio | Probabilità | Impatto | Mitigazione |
+|---------|-------------|---------|-------------|
+| **CDP instabile** | Media | Alto | Retry logic, fallback a Selenium (backlog) |
+| **MQTT message loss** | Bassa | Alto | Persistenza task store, QoS 2 MQTT |
+| **Memory leak Chrome** | Media | Medio | Restart automatico sessioni ogni 100 task |
+| **Terraform state lock** | Bassa | Medio | Timeout + force-unlock automatico |
+
+### Operativi
+
+| Rischio | Probabilità | Impatto | Mitigazione |
+|---------|-------------|---------|-------------|
+| **Single point of failure (gateway)** | Alta | Alto | Deploy ridondante (backlog Q2 2025) |
+| **Nessun monitoring** | Alta | Medio | Implementare Prometheus (Q1 2025) |
+| **Documentazione incompleta** | Media | Medio | Sprint documentazione (settimana 5-6) |
+| **Mancanza di runbook** | Media | Alto | Completare OPERATIONS_RUNBOOK.md (settimana 2) |
+
+### Sicurezza
+
+| Rischio | Probabilità | Impatto | Mitigazione |
+|---------|-------------|---------|-------------|
+| **CDP esposto su rete** | Media | Critico | Firewall localhost-only, audit regolare |
+| **MQTT senza TLS** | Alta | Alto | Implementare TLS (settimana 2) |
+| **Nessuna auth MCP** | Alta | Alto | Implementare auth (settimana 1) |
+| **Audit log manomesso** | Bassa | Alto | Backup remoto, checksum SHA256 |
+
+## Dipendenze Esterne
+
+| Dipendenza | Versione | Criticità | Alternative |
+|------------|----------|-----------|-------------|
+| **Chrome CDP** | 114+ | Alta | Firefox Marionette (backlog) |
+| **Mosquitto** | 2.0+ | Media | EMQX, VerneMQ |
+| **Terraform CLI** | 1.5+ | Media | OpenTofu (compatibile) |
+| **FastAPI** | 0.100+ | Media | Flask, Quart |
+
+## Checklist Handover
+
+- [ ] Tutti i file documentazione aggiornati
+- [ ] Test suite con coverage > 70%
+- [ ] CI/CD pipeline funzionante (GitHub Actions)
+- [ ] Ambiente staging deployato
+- [ ] Runbook operativo testato
+- [ ] Security audit completato
+- [ ] Backup e recovery testati
+- [ ] Monitoring e alerting configurati
+- [ ] Onboarding per nuovi sviluppatori (AI_ONBOARDING.md)
+
+## Contatti
+
+| Ruolo | Nome | Email | Slack |
+|-------|------|-------|-------|
+| **Tech Lead** | [Da assegnare] | [TBD] | [TBD] |
+| **Go Developer** | [Da assegnare] | [TBD] | [TBD] |
+| **Python Developer** | [Da assegnare] | [TBD] | [TBD] |
+| **DevOps** | [Da assegnare] | [TBD] | [TBD] |
+
+## Appendice: Comandi Utili
+
+```bash
+# Build tutto
+make build-all
+
+# Test tutto
+make test-all
+
+# Deploy staging
+make deploy-staging
+
+# Backup task store
+./scripts/backup_task_store.sh
+
+# Restore task store
+./scripts/restore_task_store.sh
+
+# Security scan
+make security-scan
+
+# Performance test
+make perf-test
+```

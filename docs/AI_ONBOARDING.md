@@ -1,111 +1,178 @@
-# AI Onboarding and Reconstruction Guide
+# AI Onboarding - OmniNode
 
-## Mission
+## Regole per AI Assistant
 
-This guide lets a new AI reconstruct Omninode from the repository rather than from conversation history.
+### Cosa Fare
 
-## Initial prompt
+1. **Leggere prima ARCHITECTURE.md**: Comprendere topologia client-gateway prima di modificare codice
+2. **Testare ogni modifica**: Eseguire `go test ./...` (Go) o `pytest` (Python) prima di commit
+3. **Mantenere backward compatibility**: Non rompere API MCP esistenti senza major version bump
+4. **Documentare cambiamenti**: Aggiornare file .md rilevanti se si modifica comportamento
+5. **Seguire convenzioni**: Nomi file snake_case (Python), camelCase (Go), commenti in inglese
 
-```text
-You are the next Principal Distributed Systems Architect and Expert AI Systems Engineer for Omninode.
+### Cosa Non Fare
 
-Do not assume prior conversation context. Reconstruct the project from the repository.
+1. **Non modificare config di default** senza esplicita richiesta
+2. **Non introdurre dipendenze** senza approvazione (controllare requirements.txt, go.mod)
+3. **Non disabilitare security** (policy_engine, audit) anche per testing
+4. **Non commitare secret** (.env, chiavi API) - usare env var o vault
+5. **Non ignorare test falliti**: Fixare prima di procedere
 
-Read these files in order:
-1. docs/AI_ONBOARDING.md
-2. PROJECT_HANDOVER.md
-3. docs/REPOSITORY_MAP.md
-4. ARCHITECTURE.md
-5. SECURITY.md
-6. docs/OPERATIONS_RUNBOOK.md
-7. ROADMAP.md
-8. INDEX.md
+## Architettura (Breve)
 
-Omninode is a distributed AI execution fabric, not a remote shell. External AI expresses structured intent; the gateway coordinates; MQTT transports; local policy authorizes; the node executes only explicit capabilities. The philosophy is local autonomy, least privilege, auditability, safe denial, reproducibility, and incremental proof.
-
-Repository: ZooL-OhKi/omninode
-Branch: feature/browse-rpc-mqtt
-Implementation checkpoint: 325eee3
-Documentation checkpoint: eb678f9
-
-Reconstruct the actual system before modifying it. Inspect:
-- current FastAPI routes;
-- MQTT client library, connection lifecycle, topic names, QoS, and correlation handling;
-- Go entry point and gateway client;
-- MCP tool registration and dispatch path;
-- task DTOs;
-- policy, audit, workspace, and executor paths;
-- tests and configuration variables.
-
-Report the current call graph and identify the smallest missing link. The immediate goal is one real vertical slice:
-MCP/HTTP -> FastAPI -> MQTT task -> local omniclient subscriber -> validation -> workspace.write -> correlated MQTT response -> real caller result.
-
-The first capability is workspace.write in a temporary registered workspace. Use structured versioned tasks with task_id, goal_id, agent_id, node_id, capability, deadline, and payload. Preserve existing public interfaces unless a migration is documented.
-
-Do not implement arbitrary shell execution, credential harvesting, browser anti-detection, CAPTCHA bypass, public anonymous broker access, or silent privilege elevation. Do not declare success because unit tests pass; demonstrate one real task result.
-
-After work, report exact files changed, commands run, outputs, limitations, security decisions, and next milestone. Do not commit or push without explicit approval.
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                         omniclient (Go)                              │
+│  MCP Server (:8080) → CDP Agent (:9222) → Chrome                    │
+│                      → Gateway Client (HTTP) → node1-gateway        │
+│                      → MQTT Client (Pub/Sub) → Mosquitto            │
+└─────────────────────────────────────────────────────────────────────┘
+                                    ↓ HTTP + MQTT
+┌─────────────────────────────────────────────────────────────────────┐
+│                      node1-gateway (Python)                          │
+│  FastAPI (:8000) → MQTT Service → Task Store → Policy Engine        │
+│                              → Browser Runtime → Chrome CDP          │
+│                              → Audit Logger → JSONL file             │
+└─────────────────────────────────────────────────────────────────────┘
 ```
 
-## Reconstruction workflow
+**Flusso tipico (browser_navigate)**:
+1. MCP Client (Claude Desktop) → `browser_navigate(url="https://example.com")`
+2. mcp_server.go → gateway_client.go → HTTP POST /browser/navigate
+3. node1-gateway → mqtt_service.py → topic `omni/browser/request`
+4. browser_runtime.py → esegue navigazione su Chrome CDP
+5. browser_runtime.py → mqtt_service.py → topic `omni/browser/result`
+6. gateway_client.go → mcp_server.go → MCP Client (response)
 
-### 1. Establish source of truth
+## Convenzioni di Codice
 
-Record branch and commit:
+### Go (omniclient/)
 
-```powershell
-git branch --show-current
-git log -5 --oneline
-git status --short
+```go
+// Package comment per ogni file
+package main
+
+// Funzioni: UpperCamelCase per exported, lowerCamelCase per private
+func NewMCPServer(config Config) *MCPServer { ... }
+func (s *MCPServer) handleNavigate(ctx context.Context, req NavigateRequest) (*NavigateResponse, error) { ... }
+
+// Struct: UpperCamelCase
+type NavigateRequest struct {
+    URL       string `json:"url"`
+    TimeoutMs int    `json:"timeout_ms"`
+}
+
+// Errori: wrapping con fmt.Errorf("%w")
+if err != nil {
+    return nil, fmt.Errorf("navigate to %s: %w", req.URL, err)
+}
+
+// Test: file *_test.go, funzione TestXxx(t *testing.T)
+func TestMCPServer_Navigate(t *testing.T) {
+    // ...
+}
 ```
 
-If the working tree is dirty, stop and inspect before pulling or editing.
+### Python (node1-gateway/)
 
-### 2. Build the map
+```python
+# Docstring per ogni modulo
+"""MQTT service for async task messaging."""
 
-Read the root guides. Then inspect gateway entry points, MQTT service, Go entry point, client, policy, audit, workspace, and executor modules. Search for `dispatch_task`, `publish`, `subscribe`, `task_id`, `correlation`, `workspace.write`, and `heartbeat`.
+# Funzioni: snake_case, type hints obbligatori
+def publish_task(topic: str, payload: dict) -> None:
+    """Publish task to MQTT topic."""
+    ...
 
-### 3. Draw the actual call graph
+# Classi: UpperCamelCase, docstring per metodi pubblici
+class BrowserRuntime:
+    """Remote browser automation via CDP."""
+    
+    async def navigate(self, url: str, timeout_ms: int = 30000) -> dict:
+        """Navigate to URL and return result."""
+        ...
 
-Do not trust intended architecture over code. Write down:
+# Eccezioni: wrapping con raise ... from
+try:
+    ...
+except Exception as e:
+    raise RuntimeError(f"navigate failed: {e}") from e
 
-```text
-caller -> API/MCP method -> gateway method -> MQTT publish
-      -> subscriber -> validator -> executor -> response publish
-      -> pending response -> caller
+# Test: file test_*.py, funzione test_xxx()
+def test_browser_runtime_navigate():
+    # ...
 ```
 
-Mark each edge as implemented, partial, mocked, or missing.
+## Tool MCP Disponibili
 
-### 4. Implement the smallest missing edge
+| Tool | Input | Output | Descrizione |
+|------|-------|--------|-------------|
+| `browser_navigate` | `{url: string}` | `{success: bool, title: string}` | Naviga a URL |
+| `browser_click` | `{selector: string}` | `{success: bool}` | Click elemento |
+| `browser_type` | `{selector: string, text: string}` | `{success: bool}` | Digita testo |
+| `browser_screenshot` | `{full_page: bool}` | `{screenshot: base64}` | Screenshot |
+| `ops_terraform_plan` | `{directory: string, vars: object}` | `{output: string}` | Terraform plan |
+| `ops_terraform_apply` | `{directory: string, vars: object}` | `{output: string}` | Terraform apply |
 
-Prefer one capability and one node. Avoid broad refactors. Reuse existing DTOs, topics, locks, and configuration.
+## Comandi Utili
 
-### 5. Verify with a real result
+```bash
+# Build omniclient
+cd omniclient && go build -o omniclient .
 
-Use loopback broker and temporary workspace. The acceptance result is a real file plus a correlated response. A unit test alone is insufficient.
+# Test omniclient
+cd omniclient && go test -v ./...
 
-## Stop conditions
+# Build node1-gateway (venv)
+cd node1-gateway && source venv/bin/activate && pip install -r requirements.txt
 
-Stop and ask for a decision if:
+# Test node1-gateway
+cd node1-gateway && pytest -v
 
-- two incompatible topic contracts exist;
-- credentials are missing;
-- local changes would be overwritten;
-- a task would require unrestricted host access;
-- a browser challenge requires bypass;
-- a production deployment lacks TLS/ACLs;
-- documentation contradicts the code.
+# Avvio locale (4 terminal)
+# Terminal 1: Mosquitto
+mosquitto -c /etc/mosquitto/mosquitto.conf
 
-## Handover update rule
+# Terminal 2: Chrome
+google-chrome --remote-debugging-port=9222
 
-After every milestone update:
+# Terminal 3: Gateway
+cd node1-gateway && uvicorn main:app --reload
 
-- current commit and branch;
-- verified commands and exact results;
-- implemented and unimplemented edges;
-- active risks;
-- next smallest action;
-- changed topic/schema/configuration.
+# Terminal 4: omniclient
+cd omniclient && ./omniclient
+```
 
-Never leave “done” without evidence.
+## Debug
+
+### Problemi Comuni
+
+**MCP server non risponde**:
+```bash
+curl http://localhost:8080/health
+# Se fallisce: controllare log omniclient.log
+tail -f /var/log/omni/omniclient.log
+```
+
+**Gateway non riceve task MQTT**:
+```bash
+# Sottoscrivi topic
+mosquitto_sub -t "omni/#" -v
+
+# Pubblica test
+mosquitto_pub -t "omni/browser/request" -m '{"task_id":"test"}'
+```
+
+**Chrome CDP non connesso**:
+```bash
+curl http://localhost:9222/json/version
+# Se fallisce: riavviare Chrome
+pkill chrome && google-chrome --remote-debugging-port=9222
+```
+
+## Risorse
+
+- [ARCHITECTURE.md](../ARCHITECTURE.md) - Topologia dettagliata
+- [BUILD.md](../BUILD.md) - Istruzioni build
+- [SECURITY.md](../SECURITY.md) - Principi sicurezza
+- [MCP Specification](https://modelcontextprotocol.io/)

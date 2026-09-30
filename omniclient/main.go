@@ -1,29 +1,54 @@
 package main
 
 import (
-	"fmt"
+	"log/slog"
 	"os"
 	"os/signal"
 	"syscall"
 )
 
-// main avvia il worker Go: inizializza il browser (CDP) e il server WS locale.
-// Il processo resta in ascolto finche' non riceve SIGINT/SIGTERM.
 func main() {
-	// Inizializza il browser (Chrome reale via CDP su 127.0.0.1:9222).
+	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
+	slog.SetDefault(logger)
+
+	slog.Info("Avvio Omninode Worker...")
+
 	if err := InitWebAgent(); err != nil {
-		fmt.Fprintf(os.Stderr, "[main] Errore InitWebAgent: %v\n", err)
+		slog.Error("Impossibile avviare WebAgent", "err", err)
 		os.Exit(1)
 	}
 
-	// Avvia il server WebSocket locale (solo loopback, con token+origin).
-	StartWSServer(8080)
+	go func() {
+		if err := StartWSServer(8080); err != nil {
+			slog.Error("Errore WS Server", "err", err)
+		}
+	}()
 
-	// Hook per shutdown pulito.
-	ch := make(chan os.Signal, 1)
-	signal.Notify(ch, syscall.SIGINT, syscall.SIGTERM)
-	<-ch
+	nodeID := getEnv("OMNI_NODE_ID", "ryzen")
+	brokerURL := getEnv("OMNI_MQTT_BROKER", "tls://oracle-b.plini.net:8883")
+	caPath := getEnv("OMNI_MQTT_CA", "certs/ca.crt")
+	certPath := getEnv("OMNI_MQTT_CERT", "certs/client.crt")
+	keyPath := getEnv("OMNI_MQTT_KEY", "certs/client.key")
 
-	fmt.Fprintf(os.Stderr, "[main] Shutdown...\n")
-	// Qui si potrebbero chiudere le sessioni (sessions.Close(agentID)) se servisse.
+	worker, err := StartMQTTWorker(brokerURL, nodeID, caPath, certPath, keyPath)
+	if err != nil {
+		slog.Error("Errore connessione MQTT", "err", err)
+		os.Exit(1)
+	}
+	defer worker.Client.Disconnect(250)
+
+	// Avvia heartbeat loop (agent_1 e devops_bot come esempio)
+	go startHeartbeatLoop(worker.Client, nodeID, []string{"agent_1", "devops_bot"})
+
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+	<-sigChan
+	slog.Info("Spegnimento Omninode Worker...")
+}
+
+func getEnv(key, fallback string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return fallback
 }

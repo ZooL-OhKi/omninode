@@ -1,142 +1,183 @@
-# Omninode Operations Runbook
+# Operations Runbook - OmniNode
 
-## Purpose
+## Preflight Check
 
-Use this runbook to synchronize, inspect, validate, operate, and recover Omninode without relying on conversation history.
+Prima di avviare il sistema, verificare:
 
-## Pull the latest branch
+### 1. Dipendenze Esterne
 
-```powershell
-Set-Location A:\omninode
-git fetch origin
-git pull --ff-only origin feature/browse-rpc-mqtt
-git status --short
-git log -3 --oneline
+```bash
+# MQTT Broker
+systemctl status mosquitto
+mosquitto_sub -t "omni/#" -v
+
+# Chrome CDP
+curl http://localhost:9222/json/version
+
+# Porta gateway libera
+netstat -tlnp | grep :8000
 ```
 
-If the working tree is not clean, stop and inspect local changes. Do not use destructive reset commands as a shortcut.
+### 2. Configurazione
 
-## Read before operating
+```bash
+# node1-gateway
+cat node1-gateway/.env
 
-```text
-docs/AI_ONBOARDING.md
-PROJECT_HANDOVER.md
-NEXT_STEPS.md
-docs/REPOSITORY_MAP.md
-ARCHITECTURE.md
-SECURITY.md
+# omniclient
+cat omniclient/config.yaml
 ```
 
-## Validation baseline
+### 3. Permessi
 
-```powershell
-Set-Location A:\omninode\node1-gateway
-& ".\venv\Scripts\python.exe" -m pytest -q
-& ".\venv\Scripts\python.exe" -m compileall .
-
-Set-Location ..\omniclient
-gofmt -d .
-go test ./...
-go vet ./...
-
-Set-Location ..
-git diff --check
+```bash
+ls -la /var/log/omni/
+ls -la /opt/chrome-profiles/omni/
 ```
 
-Treat a command as passed only if its exit code is zero. Warnings must be reported, not silently ignored.
+## Avvio
 
-## Phase 1 runtime procedure
+### Sequenza di Avvio
 
-Use only loopback for the first real task.
+1. **MQTT Broker**: `mosquitto -c /etc/mosquitto/mosquitto.conf -d`
+2. **Chrome con CDP**: `google-chrome --remote-debugging-port=9222 --user-data-dir=/opt/chrome-profiles/omni &`
+3. **Gateway**: `cd node1-gateway && uvicorn main:app --host 0.0.0.0 --port 8000 &`
+4. **omniclient**: `cd omniclient && ./omniclient &`
 
-1. Confirm broker process and listener.
-2. Start FastAPI on `127.0.0.1`.
-3. Start one node client with a stable node ID.
-4. Create/register a temporary workspace.
-5. Submit one structured `workspace.write` task.
-6. Observe publish, receipt, policy decision, execution, and response.
-7. Verify the actual file and byte count.
-8. Submit an invalid path and confirm denial.
-9. Stop services cleanly.
-10. Update `PROJECT_HANDOVER.md` with exact evidence.
+### Verifica Avvio
 
-## Evidence required
-
-Record:
-
-- commit SHA;
-- broker address and security mode;
-- node ID;
-- task ID and goal ID;
-- workspace ID;
-- request and response status;
-- created path and byte count;
-- audit IDs;
-- rejection results;
-- commands and exit codes.
-
-Do not record secrets or full sensitive payloads.
-
-## Troubleshooting matrix
-
-### No gateway publish
-
-Inspect route binding, API authentication, request validation, gateway MQTT connection, and publish return code.
-
-### No node receipt
-
-Inspect exact topic, node ID, subscription timing, broker ACL, QoS, and retained-message behavior.
-
-### Node blocks task
-
-Inspect task schema, deadline, capability, agent/goal identity, workspace registration, normalized path, and policy/audit output.
-
-### File missing
-
-Inspect executor dispatch, workspace root, parent directory creation, atomic temporary file, replacement error, and process permissions.
-
-### Response missing
-
-Inspect response topic, correlation data, task ID, pending map, response timeout, and duplicate handling.
-
-### Task executes twice
-
-Inspect QoS, redelivery, task cache, acknowledgment timing, and whether the executor is idempotent.
-
-## Rebase and push recovery
-
-```powershell
-git status
-git diff --name-only --diff-filter=U
+```bash
+curl http://localhost:8000/health
+curl http://localhost:8080/health
+mosquitto_sub -t "omni/#" -v
 ```
 
-For a rebase conflict, resolve only listed files, stage them, and continue:
+## Monitoraggio
 
-```powershell
-git add <resolved-file>
-git -c core.editor=true rebase --continue
+### Metriche Chiave
+
+| Metrica | Soglia | Azione |
+|---------|--------|--------|
+| Gateway CPU | >80% per 5 min | Scalare verticalmente |
+| Gateway Memory | >90% | Restart + investigare leak |
+| MQTT Queue Depth | >1000 messaggi | Scalare broker |
+| CDP Response Time | >5s | Restart Chrome |
+| Audit Log Size | >10GB | Rotazione log |
+
+### Log da Monitorare
+
+```bash
+tail -f /var/log/omni/gateway.log | grep -E "ERROR|WARN"
+tail -f /var/log/omni/omniclient.log | grep -E "ERROR|WARN"
+tail -f /var/log/omni/audit.jsonl
+journalctl -u mosquitto -f
 ```
 
-For non-fast-forward:
+## Incidenti
 
-```powershell
-git fetch origin
-git branch backup/before-rebase
-git rebase origin/feature/browse-rpc-mqtt
-git diff --check
-git push -u origin feature/browse-rpc-mqtt
+### 1. Gateway Non Risponde
+
+```bash
+ps aux | grep uvicorn
+netstat -tlnp | grep 8000
+tail -100 /var/log/omni/gateway.log
+systemctl restart omninode-gateway
+curl http://localhost:8000/health
 ```
 
-Never force-push by default.
+### 2. Chrome CDP Disconnesso
 
-## Production gate
+```bash
+ps aux | grep chrome
+netstat -tlnp | grep 9222
+pkill -f "remote-debugging-port=9222"
+google-chrome --remote-debugging-port=9222 --user-data-dir=/opt/chrome-profiles/omni &
+curl http://localhost:9222/json/version
+```
 
-Before Oracle or public network deployment:
+### 3. MQTT Broker Iriraggiungibile
 
-- Phase 1 evidence exists;
-- TLS/mTLS is configured;
-- ACLs isolate node topics;
-- anonymous access is disabled;
-- credentials are externalized and rotatable;
-- readiness and rollback exist;
-- task state and audit are observable.
+```bash
+systemctl status mosquitto
+mosquitto_sub -t "omni/#" -v
+systemctl restart mosquitto
+```
+
+### 4. Task Store Pieno
+
+```bash
+ps aux | grep python
+sqlite3 /var/lib/omni/tasks.db "DELETE FROM tasks WHERE status='completed' AND created_at < datetime('now', '-7 days');"
+systemctl restart omninode-gateway
+```
+
+### 5. Audit Log Corrotto
+
+```bash
+python3 -c "import json; [json.loads(l) for l in open('/var/log/omni/audit.jsonl')]"
+df -h /var/log/omni/
+cp /var/log/omni/audit.jsonl /var/log/omni/audit.jsonl.corrupt.$(date +%Y%m%d%H%M%S)
+> /var/log/omni/audit.jsonl
+chmod 640 /var/log/omni/audit.jsonl
+systemctl restart omninode-gateway
+```
+
+## Shutdown
+
+```bash
+pkill -f omniclient
+systemctl stop omninode-gateway
+pkill -f "remote-debugging-port=9222"
+systemctl stop mosquitto
+```
+
+### Backup Pre-Shutdown
+
+```bash
+sqlite3 /var/lib/omni/tasks.db ".backup /backup/tasks-$(date +%Y%m%d).db"
+tar -czf /backup/audit-$(date +%Y%m%d).tar.gz /var/log/omni/audit.jsonl
+tar -czf /backup/config-$(date +%Y%m%d).tar.gz /etc/omni/ /opt/omni/
+```
+
+## Manutenzione
+
+### Settimanale
+
+```bash
+sqlite3 /var/lib/omni/tasks.db "DELETE FROM tasks WHERE status='completed' AND created_at < datetime('now', '-30 days');"
+logrotate -f /etc/logrotate.d/omninode
+ls -lh /backup/
+```
+
+### Mensile
+
+```bash
+apt update && apt upgrade -y
+openssl x509 -in /etc/omni/certs/gateway.crt -noout -dates
+./scripts/perf_test.sh
+```
+
+### Trimestrale
+
+```bash
+./scripts/dr_test.sh
+./scripts/security_audit.sh
+./scripts/capacity_report.sh
+```
+
+## Contatti Emergenza
+
+| Ruolo | Nome | Telefono | Email |
+|-------|------|----------|-------|
+| On-Call | [TBD] | [TBD] | [TBD] |
+| Tech Lead | [TBD] | [TBD] | [TBD] |
+| DevOps | [TBD] | [TBD] | [TBD] |
+
+## Comandi Utili
+
+```bash
+systemctl status omninode-gateway mosquitto
+systemctl restart omninode-gateway && sleep 5 && curl http://localhost:8000/health
+journalctl -u omninode-gateway --since "1 hour ago" | grep ERROR
+watch -n 5 'ps aux | grep -E "(python|omniclient)" | awk "{print \$2, \$3, \$4}"'
+```

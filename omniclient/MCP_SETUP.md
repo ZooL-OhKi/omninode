@@ -1,204 +1,279 @@
-# MCP Setup Guide per Omninode
+# MCP Setup - omniclient
 
-Questa guida spiega come configurare agenti IA esterni (Gemini, Claude, etc.) per connettersi al server MCP di Omninode.
+## Configurazione Claude Desktop
 
-## Panoramica
+### 1. Installazione MCP Client
 
-Omninode espone 4 tools tramite MCP (Model Context Protocol):
+Claude Desktop supporta nativamente MCP. Per configurare omniclient:
 
-| Tool | Descrizione | Input |
-|------|-------------|-------|
-| `list_nodes` | Lista tutti i nodi connessi | Nessuno |
-| `get_node_status` | Stato di un nodo specifico | `node_id` (string) |
-| `dispatch_task` | Invia task computazionale | `node_id`, `task_type`, `payload` |
-| `get_fabric_health` | Salute complessiva del fabric | Nessuno |
-
-## Modalità¹¹ di Connessione
-
-### 1. Stdio (Locale)
-
-Il server MCP viene eseguito come processo locale, comunicando via stdin/stdout.
-
-**Avvio:**
+**macOS**:
 ```bash
-cd omniclient
-./omniclient --mcp-stdio
+mkdir -p ~/Library/Application\ Support/Claude/MCP
 ```
 
-### 2. SSE (Remoto/HTTP)
-
-Il server MCP espone endpoint HTTP SSE su porta 8080.
-
-**Avvio:**
+**Linux**:
 ```bash
-cd omniclient
-wails dev
-# MCP SSE disponibile su http://localhost:8080/sse
+mkdir -p ~/.config/Claude/MCP
 ```
 
----
+**Windows**:
+```bash
+mkdir %APPDATA%\Claude\MCP
+```
 
-## Configurazione per Gemini Desktop
+### 2. Configurazione MCP Server
 
-### Prerequisiti
-- Gemini Desktop installato
-- Omninode compilato (`wails build` o `go build`)
-
-### Step 1: Configura MCP Server
-
-Apri le impostazioni di Gemini Desktop e aggiungi un nuovo MCP server:
+Creare file `mcp_config.json`:
 
 ```json
 {
   "mcpServers": {
-    "omninode": {
-      "command": "/path/to/omniclient",
-      "args": ["--mcp-stdio"],
-      "cwd": "/path/to/omniclient"
+    "omniclient": {
+      "command": "/opt/omniclient/omniclient",
+      "args": ["-config", "/opt/omniclient/config.yaml"],
+      "env": {
+        "MQTT_PASSWORD": "secret123",
+        "MCP_AUTH_TOKEN": "omni_mcp_token_12345",
+        "LOG_LEVEL": "info"
+      }
     }
   }
 }
 ```
 
-### Step 2: Verifica Connessione
-
-Nel chat di Gemini, prova:
-
-```
-Mostrami lo stato del fabric Omninode
-```
-
-Gemini dovrebbe usare il tool `get_fabric_health` automaticamente.
-
-### Step 3: Prompt di Test
-
-Ecco alcuni prompt per testare i tools:
-
-**Test list_nodes:**
-```
-Quali nodi sono connessi a Omninode?
-```
-
-**Test get_node_status:**
-```
-Qual è lo stato del nodo gateway?
-```
-
-**Test dispatch_task:**
-```
-Invia un task di tipo 'compute' al nodo 'node-1' per sommare i valori [1,2,3,4,5]
-```
-
-**Test get_fabric_health:**
-```
-Come sta la salute complessiva del fabric?
-```
-
----
-
-## Configurazione per Claude Desktop
-
-### Prerequisiti
-- Claude Desktop installato
-- Node.js 18+ (per MCP SDK)
-
-### Step 1: Installa MCP Client
+### 3. Verifica Connessione
 
 ```bash
-npm install -g @anthropic-ai/mcp-client
+# Health check
+curl http://localhost:8080/health
+# Expected: {"status":"ok","mcp_server":"running"}
+
+# Lista tool
+curl http://localhost:8080/tools
+# Expected: lista tool browser_* e ops_*
 ```
 
-### Step 2: Configura claude_desktop_config.json
+## Tool Disponibili
 
-Crea/modifica `~/Library/Application Support/Claude/claude_desktop_config.json`:
+### browser_navigate
 
+Naviga a un URL con Chrome CDP.
+
+**Esempio**:
 ```json
 {
-  "mcpServers": {
-    "omninode": {
-      "command": "/path/to/omniclient",
-      "args": ["--mcp-stdio"],
-      "cwd": "/path/to/omniclient"
-    }
+  "tool": "browser_navigate",
+  "arguments": {
+    "url": "https://example.com",
+    "timeout_ms": 30000
   }
 }
 ```
 
-### Step 3: Riavvia Claude Desktop
-
-Claude ora può usare i tools Omninode.
-
----
-
-## Configurazione per Cursor IDE
-
-### Step 1: Imposta MCP in Cursor
-
-Vai su Settings → MCP → Add Server:
-
-- **Name**: `omninode`
-- **Type**: `Local`
-- **Command**: `/path/to/omniclient --mcp-stdio`
-
-### Step 2: Usa nei Prompt
-
-Nei prompt di Cursor (Cmd+K o Cmd+L), chiedi:
-
-```
-@omninode Qual è lo stato del fabric?
+**Risposta**:
+```json
+{
+  "success": true,
+  "title": "Example Domain",
+  "final_url": "https://example.com/"
+}
 ```
 
----
+### browser_click
 
-## Test con Client Python
+Click su un elemento (CSS selector).
 
-Se vuoi testare senza agenti IA, usa lo script Python incluso:
+**Esempio**:
+```json
+{
+  "tool": "browser_click",
+  "arguments": {
+    "selector": "#submit-button",
+    "timeout_ms": 5000
+  }
+}
+```
+
+**Risposta**:
+```json
+{
+  "success": true,
+  "element_text": "Submit"
+}
+```
+
+### browser_type
+
+Digita testo in un input field.
+
+**Esempio**:
+```json
+{
+  "tool": "browser_type",
+  "arguments": {
+    "selector": "#username",
+    "text": "mario.rossi",
+    "clear_first": true
+  }
+}
+```
+
+**Risposta**:
+```json
+{
+  "success": true,
+  "characters_typed": 11
+}
+```
+
+### browser_screenshot
+
+Screenshot della pagina.
+
+**Esempio**:
+```json
+{
+  "tool": "browser_screenshot",
+  "arguments": {
+    "full_page": true,
+    "format": "png"
+  }
+}
+```
+
+**Risposta**:
+```json
+{
+  "success": true,
+  "screenshot": "iVBORw0KGgoAAAANSUhEUgAAAA...",
+  "width": 1920,
+  "height": 1080
+}
+```
+
+### ops_terraform_plan
+
+Esegue `terraform plan`.
+
+**Esempio**:
+```json
+{
+  "tool": "ops_terraform_plan",
+  "arguments": {
+    "directory": "/path/to/infra",
+    "vars": {"environment": "prod"},
+    "timeout_seconds": 300
+  }
+}
+```
+
+**Risposta**:
+```json
+{
+  "success": true,
+  "output": "Plan: 2 to add, 0 to change, 0 to destroy.",
+  "exit_code": 0
+}
+```
+
+### ops_terraform_apply
+
+Esegue `terraform apply`.
+
+**Esempio**:
+```json
+{
+  "tool": "ops_terraform_apply",
+  "arguments": {
+    "directory": "/path/to/infra",
+    "vars": {"environment": "prod"},
+    "auto_approve": false,
+    "timeout_seconds": 600
+  }
+}
+```
+
+**Risposta**:
+```json
+{
+  "success": true,
+  "output": "Apply complete! Resources: 2 added.",
+  "exit_code": 0
+}
+```
+
+## Verifica Setup
+
+### 1. Test Connessione
 
 ```bash
-cd omniclient
+# Health gateway
+curl http://localhost:8000/health
 
-# Test via stdio
-python test_mcp_client.py --stdio
+# Health omniclient
+curl http://localhost:8080/health
 
-# Test via SSE (richiede wails dev in esecuzione)
-python test_mcp_client.py --sse
+# MQTT broker
+mosquitto_sub -t "omni/#" -v
 ```
 
----
+### 2. Test Tool MCP
+
+```bash
+# browser_navigate
+curl -X POST http://localhost:8080/invoke \
+  -H "Content-Type: application/json" \
+  -d '{"tool":"browser_navigate","arguments":{"url":"https://example.com"}}'
+
+# ops_terraform_plan
+curl -X POST http://localhost:8080/invoke \
+  -H "Content-Type: application/json" \
+  -d '{"tool":"ops_terraform_plan","arguments":{"directory":"/tmp/test-infra"}}'
+```
+
+### 3. Test Claude Desktop
+
+1. Aprire Claude Desktop
+2. Creare nuovo chat
+3. Usare prompt: "Naviga su https://example.com e fai screenshot"
+4. Verificare che Claude usi tool browser_navigate e browser_screenshot
 
 ## Troubleshooting
 
-### Il client non vede i tools
+### MCP server non risponde
 
-1. Verifica che il server sia in esecuzione
-2. Controlla i log: `./omniclient --mcp-stdio 2>&1 | tee mcp.log`
-3. Assicurati che il percorso nel config sia corretto
-
-### Errori di connessione SSE
-
-1. Verifica che la porta 8080 sia libera
-2. Controlla firewall/antivirus
-3. Prova `curl http://localhost:8080/sse`
-
-### Tools non vengono chiamati
-
-Alcuni agenti richiedono prompt espliciti. Prova:
-
-```
-Usa il tool list_nodes per mostrare i nodi
+```bash
+ps aux | grep omniclient
+netstat -tlnp | grep 8080
+tail -100 /var/log/omni/omniclient.log | grep ERROR
+systemctl restart omninode-client
 ```
 
----
+### Tool non disponibili
 
-## Esempio di Integrazione Avanzata
-
-Puoi usare Omninode per orchestrare task complessi:
-
-```
-1. Usa get_fabric_health per verificare lo stato
-2. Usa list_nodes per trovare il nodo con load minore
-3. Usa dispatch_task per inviare un task computazionale
-4. Usa get_node_status per monitorare l'esecuzione
+```bash
+curl http://localhost:8080/tools
+systemctl restart omninode-client
 ```
 
-Questo permette agli agenti IA di usare Omninode come fabric di calcolo distribuito.
+### Claude non usa MCP
+
+1. Verificare mcp_config.json in ~/Library/Application Support/Claude/MCP/
+2. Riavviare Claude Desktop
+3. Controllare log Claude: ~/Library/Logs/Claude/
+
+### Gateway irraggiungibile
+
+```bash
+curl http://gateway:8000/health
+grep "gateway" /var/log/omni/omniclient.log | grep ERROR
+systemctl restart omninode-gateway
+```
+
+## Risorse
+
+- [README.md](README.md) - Setup omniclient
+- [HANDOFF.md](HANDOFF.md) - Stato componenti
+- [ARCHITECTURE.md](../ARCHITECTURE.md) - Architettura dettagliata
+- [MCP Specification](https://modelcontextprotocol.io/)
+- [Claude Desktop Docs](https://claude.ai/docs)

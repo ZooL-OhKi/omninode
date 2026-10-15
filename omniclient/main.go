@@ -41,10 +41,10 @@ func main() {
 		slog.Error("Errore connessione MQTT", "err", err)
 		os.Exit(1)
 	}
-	defer worker.Client.Disconnect(250)
+	defer client.Disconnect(250)
 
 	// Avvia heartbeat loop
-	go startHeartbeatLoop(worker.Client, nodeID, []string{"agent_1", "devops_bot"})
+	go startHeartbeatLoop(client, nodeID, []string{"agent_1", "devops_bot"})
 
 	// Attendi segnale di terminazione
 	sigChan := make(chan os.Signal, 1)

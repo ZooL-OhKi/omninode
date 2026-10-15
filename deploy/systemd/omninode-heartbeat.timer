@@ -1,0 +1,10 @@
+[Unit]
+Description=OmniNode Worker Heartbeat Timer
+
+[Timer]
+OnBootSec=5s
+OnUnitActiveSec=30s
+AccuracySec=1s
+
+[Install]
+WantedBy=timers.target

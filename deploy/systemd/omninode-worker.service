@@ -1,16 +1,17 @@
 [Unit]
-Description=Omninode Worker Resident Service
-After=network-online.target omninode-gateway.service
+Description=OmniNode Fleet Worker Client (Live Pilot)
+After=network.target mosquitto.service
 
 [Service]
 Type=simple
 User=omninode
 WorkingDirectory=/opt/omninode/omniclient
-ExecStart=/opt/omninode/omniclient/omniclient
+ExecStart=/opt/omninode/omniclient/omniclient --node-id=node2 --broker=wss://localhost:9001
 Restart=always
 RestartSec=5
 StandardOutput=journal
 StandardError=journal
+SyslogIdentifier=omninode-worker
 
 [Install]
 WantedBy=multi-user.target

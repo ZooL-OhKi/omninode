@@ -1,7 +1,6 @@
 [Unit]
-Description=Omninode Gateway Resident Service
-After=network-online.target
-Wants=network-online.target
+Description=OmniNode Gateway Controller (Live Pilot)
+After=network.target mosquitto.service
 
 [Service]
 Type=simple
@@ -12,6 +11,7 @@ Restart=always
 RestartSec=5
 StandardOutput=journal
 StandardError=journal
+SyslogIdentifier=omninode-gateway
 
 [Install]
 WantedBy=multi-user.target

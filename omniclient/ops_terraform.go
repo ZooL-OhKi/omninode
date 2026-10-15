@@ -129,9 +129,3 @@ func executeTerraform(client mqtt.Client, nodeID, taskID, subcmd string) {
 		publishRes(client, nodeID, taskID, "success", outputStr)
 	}
 }
-
-func publishRes(client mqtt.Client, nodeID, taskID, status, output string) {
-	res := map[string]string{"task_id": taskID, "status": status, "output": output}
-	payload, _ := json.Marshal(res)
-	client.Publish(fmt.Sprintf("omninode/nodes/%s/result/%s", nodeID, taskID), 1, false, payload)
-}

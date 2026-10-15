@@ -26,11 +26,7 @@ func main() {
 	}
 
 	// Avvia WebSocket locale (opzionale, per debug)
-	go func() {
-		if err := StartWSServer(8080); err != nil {
-			slog.Error("Errore WS Server", "err", err)
-		}
-	}()
+	go StartWSServer(8080)
 
 	// Configura parametri MQTT da variabili d'ambiente
 	nodeID := getEnv("OMNI_NODE_ID", "ryzen")

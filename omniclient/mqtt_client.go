@@ -8,7 +8,6 @@ import (
 	"log/slog"
 	"os"
 	"strings"
-	"time"
 
 	mqtt "github.com/eclipse/paho.mqtt.golang"
 )
@@ -155,27 +154,4 @@ func publishRes(client mqtt.Client, nodeID, taskID, status, output string) {
 	res := map[string]string{"task_id": taskID, "status": status, "output": output}
 	payload, _ := json.Marshal(res)
 	client.Publish(fmt.Sprintf("omninode/nodes/%s/result/%s", nodeID, taskID), 1, false, payload)
-}
-
-// publishHeartbeat invia un heartbeat periodico.
-func publishHeartbeat(client mqtt.Client, nodeID string, agents []string) {
-	topic := fmt.Sprintf("omninode/nodes/%s/heartbeat", nodeID)
-	payload := map[string]interface{}{
-		"node_id":          nodeID,
-		"status":           "online",
-		"supported_agents": agents,
-		"timestamp":        time.Now().Format(time.RFC3339),
-	}
-	data, _ := json.Marshal(payload)
-	client.Publish(topic, 1, false, data)
-}
-
-// startHeartbeatLoop avvia il loop di heartbeat ogni 30 secondi.
-func startHeartbeatLoop(client mqtt.Client, nodeID string, agents []string) {
-	ticker := time.NewTicker(30 * time.Second)
-	defer ticker.Stop()
-	publishHeartbeat(client, nodeID, agents)
-	for range ticker.C {
-		publishHeartbeat(client, nodeID, agents)
-	}
 }

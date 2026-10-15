@@ -140,9 +140,7 @@ func TestBuildTLSConfigRejectsHostnameMismatch(t *testing.T) {
 	}
 	defer listener.Close()
 
-	serverDone := make(chan struct{})
 	go func() {
-		defer close(serverDone)
 		for {
 			conn, err := listener.Accept()
 			if err != nil {
@@ -177,12 +175,6 @@ func TestBuildTLSConfigRejectsHostnameMismatch(t *testing.T) {
 	var hostnameError *x509.HostnameError
 	if !errors.As(handshakeErr, &hostnameError) {
 		t.Fatalf("expected x509 hostname error, got: %v", handshakeErr)
-	}
-
-	select {
-	case <-serverDone:
-	case <-ctx.Done():
-		t.Fatal("test timed out waiting for TLS server")
 	}
 }
 

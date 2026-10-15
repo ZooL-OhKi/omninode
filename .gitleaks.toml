@@ -1,0 +1,18 @@
+[title]
+description = "Omninode Gitleaks Security Configuration"
+
+[allowlist]
+description = "Omninode allowed patterns and templates"
+paths = [
+    '''\.env\.example$''',
+    '''node1-gateway/\.env\.example$''',
+    '''deploy/oracle/env.example$''',
+    '''README\.md$''',
+    '''docs/.*\.md$''',
+]
+regexes = [
+    '''ci-test-only-not-a-secret''',
+    '''ci-test-only-mcp-secret''',
+    '''test-mcp-secret''',
+    '''scegli-un-segreto-lungo''',
+]

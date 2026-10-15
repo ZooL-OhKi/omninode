@@ -1,97 +1,209 @@
-name: Build and Release
+name: OmniNode CI
 
 on:
   push:
-    branches: [main]
-    tags:
-      - 'v*'
+    branches:
+      - main
+      - 'feature/**'
   pull_request:
-    branches: [main]
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
-  # === Node1 Gateway (Python/FastAPI) ===
-  node1-gateway:
+  secret-scan:
+    name: Secret Scan & Source Hygiene
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-      - name: Set up Python
+      - name: Check git diff whitespace and conflict markers
+        run: git diff --check
+
+      - name: Verify no forbidden files or secrets are tracked
+        shell: python3 {0}
+        run: |
+          import pathlib
+          import re
+          import subprocess
+          import sys
+
+          tracked = subprocess.check_output(
+              ["git", "ls-files"], text=True
+          ).splitlines()
+
+          forbidden_file_patterns = [
+              re.compile(r"(^|/)\.env(\..+)?$"),
+              re.compile(r"\.(pem|key|p12|pfx|crt|der|jks)$", re.IGNORECASE),
+              re.compile(r"\.(db|sqlite|sqlite3)$", re.IGNORECASE),
+              re.compile(r"\.(exe|dll|so|dylib)$", re.IGNORECASE),
+              re.compile(r"(^|/)omniclient-linux(-amd64)?$"),
+          ]
+          allowed_env_templates = {
+              ".env.example",
+              "node1-gateway/.env.example",
+              "deploy/oracle/env.example",
+          }
+
+          violations = []
+          for rel_path in tracked:
+              if rel_path in allowed_env_templates or rel_path.endswith("/.env.example") or rel_path.endswith("/env.example"):
+                  continue
+              for pattern in forbidden_file_patterns:
+                  if pattern.search(rel_path):
+                      violations.append(f"Forbidden tracked file: {rel_path}")
+                      break
+
+          secret_regexes = [
+              (
+                  "PEM Private Key",
+                  re.compile(
+                      r"-----BEGIN (?:RSA |EC |DSA |OPENSSH |ENCRYPTED )?PRIVATE KEY-----\s+[A-Za-z0-9+/=\s]{64,}-----END (?:RSA |EC |DSA |OPENSSH |ENCRYPTED )?PRIVATE KEY-----",
+                      re.MULTILINE,
+                  ),
+              ),
+              (
+                  "GitHub Token",
+                  re.compile(r"\b(?:ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9]{36,}\b"),
+              ),
+              (
+                  "GitHub Fine-Grained PAT",
+                  re.compile(r"\bgithub_pat_[A-Za-z0-9_]{22,}\b"),
+              ),
+              (
+                  "AWS Access Key ID",
+                  re.compile(r"\bAKIA[0-9A-Z]{16}\b"),
+              ),
+              (
+                  "Perplexity API Key",
+                  re.compile(r"\bpplx-[A-Za-z0-9]{32,}\b"),
+              ),
+              (
+                  "Slack Token",
+                  re.compile(r"\bxox[baprs]-[A-Za-z0-9-]{10,}\b"),
+              ),
+          ]
+
+          for rel_path in tracked:
+              path = pathlib.Path(rel_path)
+              if not path.is_file():
+                  continue
+              try:
+                  content = path.read_text(encoding="utf-8", errors="ignore")
+              except OSError:
+                  continue
+              for label, regex in secret_regexes:
+                  if regex.search(content):
+                      violations.append(f"Potential secret ({label}) detected in: {rel_path}")
+
+          if violations:
+              print("ERROR: Secret scan or repository hygiene check failed:", file=sys.stderr)
+              for item in violations:
+                  print(f"  - {item}", file=sys.stderr)
+              sys.exit(1)
+
+          print(f"Hygiene and secret pattern check passed ({len(tracked)} tracked files inspected).")
+
+      - name: Run Gitleaks on commit history
+        run: |
+          GITLEAKS_VERSION="8.21.2"
+          curl -sSfL "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" -o /tmp/gitleaks.tar.gz
+          tar -xzf /tmp/gitleaks.tar.gz -C /tmp gitleaks
+          chmod +x /tmp/gitleaks
+          /tmp/gitleaks detect --source . --redact --no-banner --log-opts="-1" -v
+
+  python-ci:
+    name: Python Gateway & Scripts Pytest
+    runs-on: ubuntu-latest
+    needs: secret-scan
+    timeout-minutes: 15
+    env:
+      MQTT_BROKER: "127.0.0.1"
+      MQTT_PORT: "8883"
+      MQTT_HOST: "127.0.0.1"
+      MQTT_USERNAME: "gateway"
+      MQTT_PASSWORD: "ci-test-only-not-a-secret"
+      MCP_SECRET: "ci-test-only-mcp-secret"
+      MQTT_CA_PATH: "/tmp/omninode-ci-missing-ca.crt"
+      MQTT_CERT_PATH: "/tmp/omninode-ci-missing-client.crt"
+      MQTT_KEY_PATH: "/tmp/omninode-ci-missing-client.key"
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+          cache: 'pip'
+          cache-dependency-path: node1-gateway/requirements.txt
 
-      - name: Install dependencies
+      - name: Install Python dependencies
         working-directory: ./node1-gateway
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-          pip install pytest pytest-asyncio httpx
 
-      - name: Lint with flake8
+      - name: Verify Python bytecode compilation
+        run: |
+          python -m compileall -q node1-gateway scripts
+
+      - name: Run pytest (node1-gateway)
         working-directory: ./node1-gateway
         run: |
-          pip install flake8
-          flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
+          pytest -v
 
-      - name: Run tests
-        working-directory: ./node1-gateway
-        run: pytest || echo "No tests yet"
+      - name: Run pytest (scripts)
+        run: |
+          if [ -f scripts/test_oracle_bootstrap.py ]; then
+            PYTHONPATH=scripts pytest -v scripts/test_oracle_bootstrap.py
+          fi
 
-  # === OmniClient (Go + Wails) ===
-  omniclient:
+  go-ci:
+    name: Go Worker Vet, Test & Build (linux/amd64)
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        platform: [windows-latest, macos-latest, ubuntu-latest]
+    needs: secret-scan
+    timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.21'
+          go-version-file: 'omniclient/go.mod'
+          cache-dependency-path: 'omniclient/go.sum'
 
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '18'
-
-      - name: Install Wails
-        run: go install github.com/wailsapp/wails/v2/cmd/wails@latest
-
-      - name: Install frontend dependencies
+      - name: Verify Go modules
         working-directory: ./omniclient
-        run: |
-          if [ -f frontend/package.json ]; then
-            cd frontend && npm install
-          fi
+        run: go mod verify
 
-      - name: Build
+      - name: Run go vet
         working-directory: ./omniclient
+        run: go vet ./...
+
+      - name: Run go test
+        working-directory: ./omniclient
+        run: go test -v -count=1 ./...
+
+      - name: Build Linux amd64 binary
+        working-directory: ./omniclient
+        env:
+          CGO_ENABLED: "0"
+          GOOS: "linux"
+          GOARCH: "amd64"
         run: |
-          wails build -platform ${{ matrix.platform == 'windows-latest' && 'windows' || matrix.platform == 'macos-latest' && 'darwin' || 'linux' }}
-
-      - name: Upload build artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: omniclient-${{ matrix.platform }}
-          path: omniclient/build/bin/*
-
-  # === Release (on tag) ===
-  release:
-    needs: [node1-gateway, omniclient]
-    runs-on: ubuntu-latest
-    if: startsWith(github.ref, 'refs/tags/')
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Download all artifacts
-        uses: actions/download-artifact@v4
-        with:
-          path: artifacts
-
-      - name: Create Release
-        uses: softprops/action-gh-release@v1
-        with:
-          files: artifacts/**/*
-          generate_release_notes: true
+          go build -v -trimpath -ldflags="-s -w" -o omniclient-linux-amd64 .
+          test -x omniclient-linux-amd64
+          rm -f omniclient-linux-amd64

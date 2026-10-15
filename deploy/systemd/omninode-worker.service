@@ -1,0 +1,16 @@
+[Unit]
+Description=Omninode Worker Resident Service
+After=network-online.target omninode-gateway.service
+
+[Service]
+Type=simple
+User=omninode
+WorkingDirectory=/opt/omninode/omniclient
+ExecStart=/opt/omninode/omniclient/omniclient
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

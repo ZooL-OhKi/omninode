@@ -8,6 +8,7 @@ from audit import AuditEventEngine
 from autonomy_core import (PROTECTED_PATHS, RepoWorkspace, VERIFICATION_PRESETS,
                            VerificationExecutor, redact)
 from work_loop import PerplexityHelper, SelfHostingWorkLoop
+from workspace_manager import WorkspaceManager
 
 
 @pytest.fixture
@@ -239,6 +240,35 @@ def test_loop_recorder_called(repo):
     assert seen == [("g8", "committed")]
 
 
+class _AllowPolicy:
+    def authorize(self, *args, **kwargs):
+        return True, "audit-test"
+
+
+def test_workspace_manager_atomic_write(tmp_path):
+    manager = WorkspaceManager(str(tmp_path), _AllowPolicy(), "agent-test", "goal-test")
+    manager.write("nested/report.txt", "atomic content")
+
+    assert (tmp_path / "nested" / "report.txt").read_text() == "atomic content"
+    assert not list((tmp_path / "nested").glob(".omninode-wm-*"))
+
+
+def test_workspace_manager_blocks_symlink_before_resolve(tmp_path):
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "secret.txt").write_text("secret")
+
+    link = tmp_path / "link"
+    try:
+        os.symlink(outside, link, target_is_directory=True)
+    except (OSError, NotImplementedError):
+        pytest.skip("symlinks unavailable")
+
+    manager = WorkspaceManager(str(tmp_path), _AllowPolicy(), "agent-test", "goal-test")
+    with pytest.raises(ValueError, match="Symlink"):
+        manager.write("link/file.txt", "blocked")
+
+
 def test_perplexity_helper_parses_response():
     import io, json
 
@@ -253,7 +283,7 @@ def test_perplexity_helper_parses_response():
     def opener(req, timeout=0):
         captured["auth"] = req.get_header("Authorization")
         captured["body"] = json.loads(req.data)
-        payload = {"choices": [{"message": {"content": "<think>hmm</think>\n```python\nX = 1\n```"}}]}
+        payload = {"choices": [{"message": {"content": "```python\nX = 1\n```"}}]}
         return Resp(json.dumps(payload).encode())
 
     h = PerplexityHelper(api_key="k-test", opener=opener)

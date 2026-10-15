@@ -1,14 +1,24 @@
 [Unit]
-Description=OmniNode Gateway Controller (Live Pilot)
-After=network.target mosquitto.service
+Description=OmniNode Gateway Controller (mTLS v1)
+After=network-online.target mosquitto.service
+Wants=network-online.target
 
 [Service]
 Type=simple
 User=omninode
+Group=omninode
 WorkingDirectory=/opt/omninode/node1-gateway
-ExecStart=/opt/omninode/node1-gateway/venv/bin/python main.py
+EnvironmentFile=/etc/omninode/omninode-gateway.env
+ExecStartPre=/usr/bin/test -r /etc/omninode/certs/ca.crt
+ExecStartPre=/usr/bin/test -r /etc/omninode/certs/gateway.crt
+ExecStartPre=/usr/bin/test -r /etc/omninode/certs/gateway.key
+ExecStart=/opt/omninode/node1-gateway/venv/bin/uvicorn autonomy_app:app --host 127.0.0.1 --port 8000
 Restart=always
 RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=/opt/omninode/node1-gateway
 StandardOutput=journal
 StandardError=journal
 SyslogIdentifier=omninode-gateway

@@ -2,92 +2,122 @@ import os
 import json
 import asyncio
 import time
+import logging
 from contextlib import asynccontextmanager
+
 from fastapi import FastAPI, Depends, HTTPException, Request, Header
 from fastapi.responses import JSONResponse, FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 import aiomqtt
 
-MQTT_BROKER = os.getenv("MQTT_BROKER", "oracle-b.plini.net")
-MQTT_PORT = int(os.getenv("MQTT_PORT", 8883))
+from mqtt_topics import MQTTTopics
+from audit_api import build_audit_router
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger("omninode.gateway")
+
+MQTT_BROKER = os.environ["MQTT_BROKER"]
+MQTT_PORT = int(os.environ["MQTT_PORT"])
 MCP_SECRET = os.environ["MCP_SECRET"]
+MQTT_CA_PATH = os.environ["MQTT_CA_PATH"]
+MQTT_CERT_PATH = os.environ["MQTT_CERT_PATH"]
+MQTT_KEY_PATH = os.environ["MQTT_KEY_PATH"]
 
-# Stato globale in memoria
-active_nodes = {}      # node_id -> {"last_seen": float, "info": dict}
-agent_routing = {}     # agent_id -> node_id
+active_nodes = {}
+agent_routing = {}
 pending_mcp_requests = {}
-sse_clients = []       # Code asyncio.Queue per i client SSE connessi
+sse_clients = []
+mqtt_ready = asyncio.Event()
 
 
-async def mqtt_listener_task():
-    async with aiomqtt.Client(hostname=MQTT_BROKER, port=MQTT_PORT) as client:
-        await client.subscribe("omninode/alerts/approval")
-        await client.subscribe("omninode/nodes/+/heartbeat")
-        await client.subscribe("omninode/nodes/+/result/+")
-
-        async for msg in client.messages:
-            topic = str(msg.topic)
-            try:
-                data = json.loads(msg.payload.decode())
-            except Exception:
-                continue
-
-            if topic == "omninode/alerts/approval":
-                sse_msg = f"event: approval_alert\ndata: {msg.payload.decode()}\n\n"
-                for q in sse_clients:
-                    await q.put(sse_msg)
-
-            elif topic.startswith("omninode/nodes/") and topic.endswith("/heartbeat"):
-                node_id = topic.split("/")[2]
-                active_nodes[node_id] = {"last_seen": time.time(), "info": data}
-                for agent_id in data.get("supported_agents", []):
-                    agent_routing[agent_id] = node_id
-
-                nodes_payload = {n_id: d["info"] for n_id, d in active_nodes.items()}
-                nodes_msg = f"event: node_update\ndata: {json.dumps(nodes_payload)}\n\n"
-                for q in sse_clients:
-                    await q.put(nodes_msg)
-
-            elif "/result/" in topic:
-                task_id = topic.split("/")[-1]
-                if task_id in pending_mcp_requests:
-                    fut = pending_mcp_requests[task_id]
-                    if not fut.done():
-                        fut.set_result(data)
+def mqtt_tls_params() -> aiomqtt.TLSParameters:
+    for path in (MQTT_CA_PATH, MQTT_CERT_PATH, MQTT_KEY_PATH):
+        if not path or not os.path.isfile(path):
+            raise RuntimeError(f"Certificato MQTT mancante o non leggibile: {path}")
+    return aiomqtt.TLSParameters(
+        ca_certs=MQTT_CA_PATH,
+        certfile=MQTT_CERT_PATH,
+        keyfile=MQTT_KEY_PATH,
+    )
 
 
-async def node_expiry_task():
+def mqtt_client() -> aiomqtt.Client:
+    return aiomqtt.Client(
+        hostname=MQTT_BROKER,
+        port=MQTT_PORT,
+        tls_params=mqtt_tls_params(),
+    )
+
+
+async def mqtt_listener_task() -> None:
+    while True:
+        try:
+            async with mqtt_client() as client:
+                await client.subscribe("omninode/v1/nodes/+/heartbeat", qos=1)
+                await client.subscribe("omninode/v1/nodes/+/responses", qos=1)
+                mqtt_ready.set()
+                logger.info("MQTT connesso e sottoscritto ai topic v1")
+
+                async for message in client.messages:
+                    topic = str(message.topic)
+                    try:
+                        data = json.loads(message.payload.decode())
+                    except (UnicodeDecodeError, json.JSONDecodeError):
+                        logger.warning("Payload JSON non valido da %s", topic)
+                        continue
+
+                    if topic.endswith("/heartbeat"):
+                        node_id = topic.split("/")[3]
+                        active_nodes[node_id] = {"last_seen": time.time(), "info": data}
+                        for agent_id in data.get("supported_agents", []):
+                            agent_routing[agent_id] = node_id
+                        await broadcast("node_update", {n: d["info"] for n, d in active_nodes.items()})
+
+                    elif topic.endswith("/responses"):
+                        task_id = data.get("task_id")
+                        future = pending_mcp_requests.get(task_id)
+                        if future and not future.done():
+                            future.set_result(data)
+
+        except aiomqtt.MqttError as exc:
+            mqtt_ready.clear()
+            logger.warning("MQTT disconnesso: %s; reconnect tra 5 secondi", exc)
+            await asyncio.sleep(5)
+
+
+async def broadcast(event: str, payload: dict) -> None:
+    message = f"event: {event}\ndata: {json.dumps(payload)}\n\n"
+    for queue in list(sse_clients):
+        await queue.put(message)
+
+
+async def node_expiry_task() -> None:
     while True:
         now = time.time()
-        expired_nodes = [n_id for n_id, d in active_nodes.items() if now - d.get("last_seen", 0) > 90]
-
-        for node_id in expired_nodes:
-            del active_nodes[node_id]
-            keys_to_delete = [k for k, v in agent_routing.items() if v == node_id]
-            for k in keys_to_delete:
-                del agent_routing[k]
-
-        if expired_nodes:
-            nodes_payload = {n_id: d["info"] for n_id, d in active_nodes.items()}
-            nodes_msg = f"event: node_update\ndata: {json.dumps(nodes_payload)}\n\n"
-            for q in sse_clients:
-                await q.put(nodes_msg)
-
+        expired = [node_id for node_id, data in active_nodes.items() if now - data.get("last_seen", 0) > 90]
+        for node_id in expired:
+            active_nodes.pop(node_id, None)
+            for agent_id, node in list(agent_routing.items()):
+                if node == node_id:
+                    agent_routing.pop(agent_id, None)
+        if expired:
+            await broadcast("node_update", {n: d["info"] for n, d in active_nodes.items()})
         await asyncio.sleep(15)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    listener_task = asyncio.create_task(mqtt_listener_task())
-    expiry_task = asyncio.create_task(node_expiry_task())
+    listener = asyncio.create_task(mqtt_listener_task())
+    expiry = asyncio.create_task(node_expiry_task())
     yield
-    listener_task.cancel()
-    expiry_task.cancel()
+    listener.cancel()
+    expiry.cancel()
 
 
-app = FastAPI(title="Omninode Gateway", lifespan=lifespan)
+app = FastAPI(title="OmniNode Gateway", lifespan=lifespan)
 os.makedirs("static", exist_ok=True)
 app.mount("/static", StaticFiles(directory="static"), name="static")
+app.include_router(build_audit_router(verify_mcp_auth))
 
 
 async def verify_mcp_auth(authorization: str = Header(None)):
@@ -100,78 +130,92 @@ def serve_dashboard():
     return FileResponse("static/index.html")
 
 
+@app.get("/healthz")
+def healthz():
+    return {"status": "ok"}
+
+
+@app.get("/readyz")
+def readyz():
+    if not mqtt_ready.is_set():
+        raise HTTPException(status_code=503, detail="MQTT non pronto")
+    return {"status": "ready", "mqtt": True}
+
+
 @app.get("/api/v1/stream")
 async def sse_stream(request: Request):
-    q = asyncio.Queue()
-    sse_clients.append(q)
-    nodes_payload = {n_id: d["info"] for n_id, d in active_nodes.items()}
-    await q.put(f"event: node_update\ndata: {json.dumps(nodes_payload)}\n\n")
+    queue = asyncio.Queue()
+    sse_clients.append(queue)
+    await queue.put(f"event: node_update\ndata: {json.dumps({n: d['info'] for n, d in active_nodes.items()})}\n\n")
 
-    async def event_generator():
+    async def generator():
         try:
             while True:
                 if await request.is_disconnected():
                     break
-                msg = await q.get()
-                yield msg
+                yield await queue.get()
         finally:
-            sse_clients.remove(q)
+            sse_clients.remove(queue)
 
-    return StreamingResponse(event_generator(), media_type="text/event-stream")
+    return StreamingResponse(generator(), media_type="text/event-stream")
 
 
 @app.get("/api/v1/nodes")
 def get_nodes():
-    return {n_id: d["info"] for n_id, d in active_nodes.items()}
+    return {node_id: data["info"] for node_id, data in active_nodes.items()}
 
 
 @app.post("/api/v1/approve", dependencies=[Depends(verify_mcp_auth)])
 async def approve_task(payload: dict):
     task_id = payload.get("task_id")
+    agent_id = payload.get("agent_id")
     decision = payload.get("decision")
-    if decision not in ["approve", "reject"]:
-        raise HTTPException(400, "Decisione non valida")
-    msg = {"task_id": task_id, "approved": decision == "approve"}
-    async with aiomqtt.Client(hostname=MQTT_BROKER, port=MQTT_PORT) as client:
-        await client.publish("omninode/approvals/in", json.dumps(msg))
-    return {"status": "ok", "message": "Decisione inoltrata al fabric"}
+    if not task_id or not agent_id or decision not in ("approve", "reject"):
+        raise HTTPException(status_code=400, detail="task_id, agent_id e decision valida sono obbligatori")
+
+    node_id = agent_routing.get(agent_id)
+    if not node_id:
+        raise HTTPException(status_code=409, detail="Nessun nodo online per l'agent richiesto")
+
+    message = {
+        "type": "task_approval",
+        "task_id": task_id,
+        "approved": decision == "approve",
+    }
+    async with mqtt_client() as client:
+        await client.publish(f"omninode/v1/nodes/{node_id}/control", json.dumps(message), qos=1)
+    return {"status": "ok", "node_id": node_id}
 
 
 @app.post("/mcp", dependencies=[Depends(verify_mcp_auth)])
 async def mcp_endpoint(request: Request):
     payload = await request.json()
-    task_id = payload.get("id", f"req_{os.urandom(4).hex()}")
+    task_id = payload.get("id") or f"req-{os.urandom(8).hex()}"
     agent_id = payload.get("params", {}).get("agent_id", "agent_1")
-    target_node = agent_routing.get(agent_id, "ryzen")
-    cmd_payload = {
+    node_id = agent_routing.get(agent_id)
+    if not node_id:
+        raise HTTPException(status_code=409, detail="Nessun nodo online per l'agent richiesto")
+
+    envelope = {
         "task_id": task_id,
-        "agent_id": agent_id,
-        "action": payload.get("method"),
-        "ref": payload.get("params", {}).get("subcmd", ""),
+        "task_type": payload.get("method", "unknown"),
+        "payload": payload.get("params", {}),
+        "submitted_at": int(time.time()),
     }
-    loop = asyncio.get_event_loop()
-    fut = loop.create_future()
-    pending_mcp_requests[task_id] = fut
+    future = asyncio.get_running_loop().create_future()
+    pending_mcp_requests[task_id] = future
+
     try:
-        async with aiomqtt.Client(hostname=MQTT_BROKER, port=MQTT_PORT) as client:
-            await client.publish(f"omninode/nodes/{target_node}/cmd/{task_id}", json.dumps(cmd_payload))
-            result = await asyncio.wait_for(fut, timeout=20.0)
-            if result.get("status") == "pending_approval":
-                return JSONResponse({
-                    "jsonrpc": "2.0",
-                    "id": task_id,
-                    "result": {"content": [{"type": "text", "text": result.get("output")}]},
-                })
-            return JSONResponse({"jsonrpc": "2.0", "id": task_id, "result": result})
+        async with mqtt_client() as client:
+            await client.publish(MQTTTopics.tasks(node_id), json.dumps(envelope), qos=1)
+            result = await asyncio.wait_for(future, timeout=20)
+        return JSONResponse({"jsonrpc": "2.0", "id": task_id, "result": result})
     except asyncio.TimeoutError:
-        return JSONResponse(status_code=504, content={"error": "Timeout in attesa del worker locale"})
+        return JSONResponse(status_code=504, content={"error": "Timeout in attesa del worker"})
     finally:
         pending_mcp_requests.pop(task_id, None)
 
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
-from audit_api import build_audit_router
-app.include_router(build_audit_router(verify_mcp_auth))
-
+    uvicorn.run(app, host="127.0.0.1", port=8000)

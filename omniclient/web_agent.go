@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/playwright-community/playwright-go"
+	"github.com/mxschmitt/playwright-go"
 )
 
 // Stato globale del browser condiviso da tutte le sessioni agente.

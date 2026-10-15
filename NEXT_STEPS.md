@@ -1,199 +1,96 @@
 # Next Steps - OmniNode
 
-## Priorità Alta (Q4 2024)
+## Stato attuale (Phase 2.5)
 
-### 1. Autenticazione e Autorizzazione MCP
+Phase 2.5 - Self-Hosting Autonomy Bootstrap e code-complete e test-green sul branch feature/phase-2.5-autonomy (non mergiato).
 
-**Stato**: ❌ Non implementato
-**Sforzo**: 3-5 giorni
-**Impatto**: Critico per produzione
+- pytest: 59 passed, 1 skipped, 0 failed.
+- go vet: clean. go test: ok.
+- git diff --check: clean.
 
-**Checklist**:
-- [ ] Implementare middleware auth su mcp_server.go (JWT o API key)
-- [ ] Aggiungere config `mcp_auth_token` in config.yaml
-- [ ] Testare con MCP client (Claude Desktop, Cline)
-- [ ] Documentare in MCP_SETUP.md
+## Priorita Alta (immediato)
 
-**Criteri di Accettazione**:
-- MCP server rifiuta richieste senza token valido
-- Token configurabile via env var
-- Log audit per tentativi falliti
+### 1. Correggere requirements.txt
 
-### 2. Persistenza Task Store
+**Stato**: da fare
+**Sforzo**: 5 minuti
 
-**Stato**: ❌ Non implementato (in-memory only)
-**Sforzo**: 5-7 giorni
-**Impatto**: Alto (recupero dopo restart)
+- [ ] Sostituire aiomqtt==2.4.2 (inesistente) con aiomqtt==2.4.0.
 
-**Checklist**:
-- [ ] Scegliere backend (SQLite, PostgreSQL, Redis)
-- [ ] Implementare interfaccia TaskStore (save, load, update, delete)
-- [ ] Migrare task_store.py da in-memory a persistente
-- [ ] Testare recovery dopo crash gateway
-- [ ] Backup automatico (cron o systemd timer)
+### 2. Rimuovere .env dal repo
 
-**Criteri di Accettazione**:
-- Task sopravvivono a restart gateway
-- Query per stato task (pending, completed, failed)
-- Cleanup automatico task > 30 giorni
+**Stato**: da fare
+**Sforzo**: 30 minuti + rotazione credenziali
 
-### 3. TLS per MQTT e HTTP
+- [ ] git rm --cached node1-gateway/.env
+- [ ] Ruotare ogni credenziale contenuta nel file.
+- [ ] Rimuovere il file dalla storia git (git filter-repo).
 
-**Stato**: ❌ Non implementato (plaintext)
-**Sforzo**: 2-3 giorni
-**Impatto**: Critico per sicurezza
+### 3. Rimuovere il default di MCP_SECRET
 
-**Checklist**:
-- [ ] Generare certificati TLS (openssl o Let's Encrypt)
-- [ ] Configurare Mosquitto per mqtts://8883
-- [ ] Aggiornare mqtt_client.go per TLS
-- [ ] Aggiornare mqtt_service.py per TLS
-- [ ] Configurare reverse proxy (nginx) per HTTPS gateway
-- [ ] Testare connessioni sicure
+**Stato**: da fare
+**Sforzo**: 10 minuti
 
-**Criteri di Accettazione**:
-- MQTT solo su mqtts:// (porta 1883 bloccata)
-- HTTPS su gateway (porta 443)
-- Certificati validi (non self-signed in produzione)
+- [ ] In main.py: MCP_SECRET = os.environ["MCP_SECRET"] (fail fast se manca).
 
-## Priorità Media (Q1 2025)
+### 4. Autenticare /api/v1/approve
 
-### 4. Multi-Sessione Browser
+**Stato**: da fare
+**Sforzo**: 30 minuti
 
-**Stato**: ❌ Single-instance
-**Sforzo**: 7-10 giorni
-**Impatto**: Alto (scalabilità)
+- [ ] Aggiungere Depends(verify_mcp_auth) all'endpoint.
 
-**Checklist**:
-- [ ] Implementare BrowserSession class in browser_runtime.py
-- [ ] Gestire multiple istanze Chrome (porte CDP dinamiche)
-- [ ] Session isolation (cookie, localStorage, cache)
-- [ ] Limiti per workspace (max sessioni concurrenti)
-- [ ] Cleanup sessioni idle (timeout 30 min)
+### 5. Correggere workspace_manager.py
 
-**Criteri di Accettazione**:
-- 5+ sessioni browser concurrenti
-- Isolamento completo tra sessioni
-- Memory usage < 2GB per 5 sessioni
+**Stato**: da fare
+**Sforzo**: 1 ora
 
-### 5. Monitoring e Alerting
+- [ ] Spostare il controllo is_symlink() prima di resolve().
+- [ ] Usare scrittura atomica (.tmp + os.replace) come in local_executor.py.
 
-**Stato**: ❌ Non implementato
-**Sforzo**: 3-5 giorni
-**Impatto**: Medio (observability)
+### 6. Rimuovere o allineare i vecchi executor
 
-**Checklist**:
-- [ ] Integrare Prometheus metrics (go_prometheus_client)
-- [ ] Esportare metrics: request_count, latency, error_rate
-- [ ] Dashboard Grafana (template JSON)
-- [ ] Alert: error_rate > 5%, latency_p99 > 5s
-- [ ] Log aggregation (Loki o ELK)
+**Stato**: da fare
+**Sforzo**: 1 ora
 
-**Criteri di Accettazione**:
-- Dashboard con metrics real-time
-- Alert su Slack/PagerDuty
-- Log queryabili per task_id, workspace_id
+- [ ] command_executor.py e test_executor.py permettono python/go con argomenti liberi (arbitrary code execution).
+- [ ] Eliminarli o sostituirli con VerificationExecutor (preset statici).
 
-### 6. Rate Limiting e Quotas
+## Priorita Media (Phase 3)
 
-**Stato**: ❌ Non implementato
-**Sforzo**: 2-3 giorni
-**Impatto**: Medio (fairness, costi)
+### 7. Schema RPC versionato
 
-**Checklist**:
-- [ ] Implementare rate limiter (token bucket) in policy_engine.py
-- [ ] Config per workspace: requests_per_minute, requests_per_day
-- [ ] Quota browser: minutes_per_day, screenshots_per_day
-- [ ] Response 429 Too Many Requests con Retry-After header
-- [ ] Metrics per quota usage
+- [ ] Definire schema_version 1, task_id, goal_id, agent_id, node_id, task_type, capability, created_at, deadline_at, payload.
+- [ ] Codici errore espliciti e versionati.
 
-**Criteri di Accettazione**:
-- Rate limiting funzionante a 10 req/min default
-- Quota enforcement per workspace
-- Alert quando quota > 80%
+### 8. Audit Transparency Log
 
-## Priorità Bassa (Q2 2025)
+- [ ] Ed25519-signed entries.
+- [ ] Merkle tree chaining.
+- [ ] Endpoint di verifica pubblicazione.
 
-### 7. Plugin System
+### 9. Tool MCP Go
 
-**Stato**: ❌ Non implementato
-**Sforzo**: 10-14 giorni
-**Impatto**: Medio (extensibility)
+- [ ] omninode_workspace_list / read / write / rollback.
+- [ ] omninode_command_verify.
+- [ ] omninode_autonomy_step.
+- [ ] Dispatch MQTT locale per workspace.* e command.run.
 
-**Checklist**:
-- [ ] Definire interfaccia Plugin (Python: ABC, Go: interface)
-- [ ] Implementare loader dinamico (importlib, plugin pkg)
-- [ ] Sandbox plugin (seccomp, gVisor)
-- [ ] Registry plugin (git submodule o marketplace)
-- [ ] Documentare SDK per sviluppatori
+### 10. Migrazione topic MQTT
 
-**Criteri di Accettazione**:
-- Plugin example funzionante (es. browser extension)
-- Isolamento sicurezza (plugin non può accedere a file system)
-- Hot reload plugin (senza restart gateway)
+- [ ] Da omninode/nodes/... a omninode/v1/nodes/{node_id}/tasks|responses|heartbeat.
+- [ ] MQTT over WSS (porta 443).
 
-### 8. GraphQL API
+## Backlog Swarm Fabric v4.0
 
-**Stato**: ❌ Non implementato (solo REST + MQTT)
-**Sforzo**: 5-7 giorni
-**Impatto**: Basso (developer experience)
-
-**Checklist**:
-- [ ] Integrare Strawberry (Python) o gql (Go)
-- [ ] Definire schema GraphQL (Query, Mutation, Subscription)
-- [ ] Resolver per task, browser, ops
-- [ ] Subscription per task status (real-time)
-- [ ] Documentare con GraphiQL
-
-**Criteri di Accettazione**:
-- Query: `task(id: "uuid") { status, result }`
-- Mutation: `browserNavigate(url: "...") { taskId }`
-- Subscription: `taskStatusChanged(taskId: "...") { status }`
-
-### 9. CLI Tool
-
-**Stato**: ❌ Non implementato
-**Sforzo**: 3-5 giorni
-**Impatto**: Basso (developer experience)
-
-**Checklist**:
-- [ ] Scegliere framework (cobra per Go, click per Python)
-- [ ] Comandi: `omni task list`, `omni browser navigate`, `omni ops plan`
-- [ ] Output: table, JSON, YAML
-- [ ] Auth integration (login, logout, token refresh)
-- [ ] Publish su PyPI e Homebrew
-
-**Criteri di Accettazione**:
-- CLI funzionale per operazioni comuni
-- Documentazione help (`omni --help`)
-- CI/CD per release automatiche
-
-## Backlog (Futuro)
-
-- [ ] Supporto WebSocket per MCP (oltre HTTP)
-- [ ] Integration con Kubernetes (operator CRD)
-- [ ] UI dashboard (React + Tailwind)
-- [ ] Supporto Firefox (oltre Chrome CDP)
-- [ ] Distributed tracing (OpenTelemetry)
-- [ ] gRPC per comunicazione client-gateway
-- [ ] Caching layer (Redis) per screenshot e DOM
-- [ ] ML-based anomaly detection (audit logs)
-
-## Dipendenze Critiche
-
-| Task | Dipende da | Bloccante |
-|------|------------|-----------|
-| Autenticazione MCP | - | No |
-| Persistenza Task Store | - | No |
-| TLS per MQTT | - | No |
-| Multi-Sessione | Persistenza Task Store | Sì |
-| Monitoring | TLS | No |
-| Rate Limiting | Autenticazione | No |
+- [ ] lifecycle_windows.go: usare golang.org/x/sys/windows Job Objects con handle reale (windows.OpenProcess), mai PID come handle.
+- [ ] spatial_pruner.js isElementCovered(): campionare centro e punti interni (2px), verificare width/height > 0 e visibility, non gli angoli esterni esatti.
+- [ ] TLS end-to-end, multi-sessione browser, monitoring Prometheus, rate limiting.
 
 ## Milestone
 
-| Milestone | Data Target | Task Inclusi |
-|-----------|-------------|--------------|
-| M1: Security Hardening | 2024-12-31 | Auth MCP, TLS MQTT/HTTP |
-| M2: Production Ready | 2025-03-31 | Persistenza, Multi-Sessione, Monitoring |
-| M3: Scale | 2025-06-30 | Rate Limiting, Plugin System, CLI |
+| Milestone | Stato | Contenuto |
+|-----------|-------|-----------|
+| Phase 2.5 | completata sul branch | autonomia self-hosting, workspace confinato, verification preset, loop atomico |
+| Phase 3 | da fare | schema RPC, audit log, tool MCP Go |
+| Swarm v4.0 | da fare | topic per nodo, Job Objects, spatial pruner, TLS |

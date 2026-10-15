@@ -20,6 +20,7 @@ func main() {
 
 	brokerURL := requiredEnv("OMNINODE_MQTT_BROKER")
 	nodeID := requiredEnv("OMNINODE_NODE_ID")
+	agentID := requiredEnv("OMNINODE_AGENT_ID")
 	username := requiredEnv("OMNINODE_MQTT_USER")
 	password := requiredEnv("OMNINODE_MQTT_PASS")
 	caPath := requiredEnv("OMNINODE_MQTT_CA_PATH")
@@ -46,7 +47,7 @@ func main() {
 	defer client.Disconnect(250)
 
 	stop := make(chan struct{})
-	go startHeartbeatLoop(client, nodeID, []string{"workspace.write"}, stop)
+	go startHeartbeatLoop(client, nodeID, []string{agentID}, stop)
 
 	signals := make(chan os.Signal, 1)
 	signal.Notify(signals, syscall.SIGINT, syscall.SIGTERM)

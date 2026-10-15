@@ -1,6 +1,8 @@
 import os
+import tempfile
 from pathlib import Path
 from policy_engine import PolicyEngine
+
 
 class WorkspaceManager:
     def __init__(self, base_dir: str, policy: PolicyEngine, agent_id: str, goal_id: str):
@@ -15,10 +17,18 @@ class WorkspaceManager:
         if ".." in relative_path or relative_path.startswith("/") or relative_path.startswith("\\"):
             raise ValueError("Path Traversal bloccato.")
 
-        full_path = (self.base_dir / relative_path).resolve()
+        candidate = self.base_dir / relative_path
 
-        if full_path.is_symlink():
+        # Controlla is_symlink() PRIMA di resolve() sia sul file sia sulle directory intermedie
+        if candidate.is_symlink():
             raise ValueError("Symlink non consentiti nel workspace.")
+        curr = candidate.parent
+        while curr != self.base_dir and self.base_dir in curr.parents:
+            if curr.is_symlink():
+                raise ValueError("Symlink non consentiti nel workspace.")
+            curr = curr.parent
+
+        full_path = candidate.resolve()
 
         for pattern in self.sensitive_patterns:
             if pattern in str(full_path).lower():
@@ -35,18 +45,37 @@ class WorkspaceManager:
 
     def write(self, relative_path: str, content: str) -> str:
         full_path = self._secure_path(relative_path)
-        allowed, audit_id = self.policy.authorize(self.agent_id, self.goal_id, "workspace.write", str(full_path), "write")
+        allowed, audit_id = self.policy.authorize(
+            self.agent_id, self.goal_id, "workspace.write", str(full_path), "write"
+        )
 
         if not allowed:
             raise PermissionError(f"Accesso negato. Audit ID: {audit_id}")
 
         full_path.parent.mkdir(parents=True, exist_ok=True)
-        full_path.write_text(content, encoding="utf-8")
+        fd, temp_name = tempfile.mkstemp(
+            prefix=".omninode-wm-",
+            dir=str(full_path.parent),
+        )
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8", newline="") as handle:
+                handle.write(content)
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.replace(temp_name, full_path)
+        finally:
+            try:
+                os.unlink(temp_name)
+            except FileNotFoundError:
+                pass
+
         return audit_id
 
     def read(self, relative_path: str) -> str:
         full_path = self._secure_path(relative_path)
-        allowed, audit_id = self.policy.authorize(self.agent_id, self.goal_id, "workspace.read", str(full_path), "read")
+        allowed, audit_id = self.policy.authorize(
+            self.agent_id, self.goal_id, "workspace.read", str(full_path), "read"
+        )
 
         if not allowed:
             raise PermissionError(f"Accesso negato. Audit ID: {audit_id}")

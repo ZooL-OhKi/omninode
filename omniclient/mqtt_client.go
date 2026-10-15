@@ -1,157 +1,73 @@
 package main
 
 import (
-	"crypto/tls"
-	"crypto/x509"
-	"encoding/json"
-	"fmt"
-	"log/slog"
-	"os"
-	"strings"
+"crypto/tls"
+"crypto/x509"
+"log"
+"os"
+"time"
 
-	mqtt "github.com/eclipse/paho.mqtt.golang"
+mqtt "github.com/eclipse/paho.mqtt.golang"
 )
 
-// CommandPayload rappresenta un comando ricevuto dal broker MQTT.
-type CommandPayload struct {
-	TaskID  string `json:"task_id"`
-	AgentID string `json:"agent_id"`
-	Action  string `json:"action"`
-	Ref     string `json:"ref,omitempty"`
-	Subcmd  string `json:"subcmd,omitempty"`
+// NewMQTTClient configura il client Paho MQTT supportando sia TLS (tcp://) che WebSocket Secure (wss://)
+// con keep-alive a 30 secondi e gestione della riconnessione resiliente.
+func NewMQTTClient(brokerURL, clientID, username, password string, caCertPath string) mqtt.Client {
+opts := mqtt.NewClientOptions()
+opts.AddBroker(brokerURL)
+opts.SetClientID(clientID)
+opts.SetUsername(username)
+opts.SetPassword(password)
+
+// Requisito: Keep-alive a 30 secondi per prevenire timeout WSS (es. Cloudflare)
+opts.SetKeepAlive(30 * time.Second)
+opts.SetPingTimeout(10 * time.Second)
+opts.SetCleanSession(false)
+opts.SetAutoReconnect(true)
+
+// Backoff esponenziale e jitter per il reconnect
+opts.SetConnectRetry(true)
+opts.SetConnectRetryInterval(5 * time.Second)
+opts.SetMaxReconnectInterval(60 * time.Second)
+
+if caCertPath != "" {
+certPool := x509.NewCertPool()
+caCert, err := os.ReadFile(caCertPath)
+if err != nil {
+log.Printf("[MQTT] Attenzione: Impossibile leggere il certificato CA da %s: %v", caCertPath, err)
+} else {
+certPool.AppendCertsFromPEM(caCert)
+tlsConfig := &tls.Config{
+RootCAs:            certPool,
+InsecureSkipVerify: false, // Mai disabilitare in produzione
+}
+opts.SetTLSConfig(tlsConfig)
+}
 }
 
-// MQTTWorker gestisce la connessione MQTT e l'elaborazione dei comandi.
-type MQTTWorker struct {
-	Client mqtt.Client
-	NodeID string
+client := mqtt.NewClient(opts)
+return client
 }
 
-// NewTLSConfig crea una configurazione TLS per MQTT mTLS.
-func NewTLSConfig(caCertPath, clientCertPath, clientKeyPath string) (*tls.Config, error) {
-	cert, err := tls.LoadX509KeyPair(clientCertPath, clientKeyPath)
-	if err != nil {
-		return nil, err
-	}
-	caCert, err := os.ReadFile(caCertPath)
-	if err != nil {
-		return nil, err
-	}
-	caCertPool := x509.NewCertPool()
-	caCertPool.AppendCertsFromPEM(caCert)
-
-	return &tls.Config{
-		Certificates: []tls.Certificate{cert},
-		RootCAs:      caCertPool,
-	}, nil
+// StartMQTTWorker avvia il worker MQTT per la ricezione dei task e l'invio delle risposte (Task A / Swarm Fabric v5.0)
+func StartMQTTWorker(client mqtt.Client, nodeID string, taskHandler func(topic string, payload []byte)) error {
+if token := client.Connect(); token.Wait() && token.Error() != nil {
+return token.Error()
 }
 
-// StartMQTTWorker avvia il worker MQTT connesso al broker mTLS.
-func StartMQTTWorker(brokerURL, nodeID, caPath, certPath, keyPath string) (*MQTTWorker, error) {
-	tlsConfig, err := NewTLSConfig(caPath, certPath, keyPath)
-	if err != nil {
-		return nil, err
-	}
-
-	opts := mqtt.NewClientOptions()
-	opts.AddBroker(brokerURL)
-	opts.SetClientID(fmt.Sprintf("omninode-worker-%s", nodeID))
-	opts.SetTLSConfig(tlsConfig)
-	opts.SetAutoReconnect(true)
-	opts.SetConnectionLostHandler(func(c mqtt.Client, err error) {
-		slog.Error("Connessione MQTT persa", "err", err)
-	})
-	opts.SetOnConnectHandler(func(c mqtt.Client) {
-		slog.Info("Connesso al broker MQTT TLS", "node", nodeID)
-		cmdTopic := fmt.Sprintf("omninode/nodes/%s/cmd/+", nodeID)
-		approvalTopic := "omninode/approvals/in"
-		if token := c.Subscribe(cmdTopic, 1, cmdHandler(nodeID)); token.Wait() && token.Error() != nil {
-			slog.Error("Errore sottoscrizione comandi", "err", token.Error())
-		}
-		if token := c.Subscribe(approvalTopic, 1, approvalHandler(nodeID)); token.Wait() && token.Error() != nil {
-			slog.Error("Errore sottoscrizione approvazioni", "err", token.Error())
-		}
-	})
-
-	client := mqtt.NewClient(opts)
-	if token := client.Connect(); token.Wait() && token.Error() != nil {
-		return nil, token.Error()
-	}
-	return &MQTTWorker{Client: client, NodeID: nodeID}, nil
+// Sottoscrizione al topic v1 / legacy dei task per questo nodo
+topic := "omninode/v1/nodes/" + nodeID + "/tasks"
+token := client.Subscribe(topic, 1, func(client mqtt.Client, msg mqtt.Message) {
+taskHandler(msg.Topic(), msg.Payload())
+})
+token.Wait()
+return token.Error()
 }
 
-// cmdHandler elabora i comandi MQTT in arrivo.
-func cmdHandler(nodeID string) mqtt.MessageHandler {
-	return func(client mqtt.Client, msg mqtt.Message) {
-		topic := msg.Topic()
-		parts := strings.Split(topic, "/")
-		if len(parts) < 5 {
-			return
-		}
-		taskID := parts[4]
-
-		var cmd CommandPayload
-		if err := json.Unmarshal(msg.Payload(), &cmd); err != nil {
-			publishRes(client, nodeID, taskID, "error", "JSON non valido")
-			return
-		}
-
-		slog.Info("Comando ricevuto", "task", taskID, "action", cmd.Action)
-
-		switch cmd.Action {
-		case "web_snapshot":
-			sess, err := sessions.GetOrCreate(cmd.AgentID)
-			if err != nil {
-				publishRes(client, nodeID, taskID, "error", err.Error())
-				return
-			}
-			out, err := SnapshotState(sess)
-			if err != nil {
-				publishRes(client, nodeID, taskID, "error", err.Error())
-			} else {
-				publishRes(client, nodeID, taskID, "success", out)
-			}
-
-		case "web_click":
-			sess, err := sessions.GetOrCreate(cmd.AgentID)
-			if err != nil {
-				publishRes(client, nodeID, taskID, "error", err.Error())
-				return
-			}
-			out, err := TrustedClick(sess, parseRef(cmd.Ref))
-			if err != nil {
-				publishRes(client, nodeID, taskID, "error", err.Error())
-			} else {
-				publishRes(client, nodeID, taskID, "success", out)
-			}
-
-		case "ops_terraform":
-			HandleTerraform(client, nodeID, taskID, cmd.AgentID, cmd.Subcmd)
-
-		default:
-			publishRes(client, nodeID, taskID, "error", "Azione sconosciuta")
-		}
-	}
-}
-
-// approvalHandler elabora le approvazioni in arrivo.
-func approvalHandler(nodeID string) mqtt.MessageHandler {
-	return func(client mqtt.Client, msg mqtt.Message) {
-		slog.Info("Approvazione ricevuta", "payload", string(msg.Payload()))
-		HandleApproval(client, nodeID, msg.Payload())
-	}
-}
-
-// parseRef converte un ref string in intero per TrustedClick.
-func parseRef(s string) int {
-	var ref int
-	fmt.Sscanf(s, "%d", &ref)
-	return ref
-}
-
-// publishRes pubblica un risultato sul topic MQTT.
-func publishRes(client mqtt.Client, nodeID, taskID, status, output string) {
-	res := map[string]string{"task_id": taskID, "status": status, "output": output}
-	payload, _ := json.Marshal(res)
-	client.Publish(fmt.Sprintf("omninode/nodes/%s/result/%s", nodeID, taskID), 1, false, payload)
+// publishRes pubblica la risposta o l'heartbeat del nodo sul topic canonico
+func publishRes(client mqtt.Client, nodeID string, subpath string, payload []byte) error {
+topic := "omninode/v1/nodes/" + nodeID + "/" + subpath
+token := client.Publish(topic, 1, false, payload)
+token.Wait()
+return token.Error()
 }

@@ -3,31 +3,56 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"time"
 
 	mqtt "github.com/eclipse/paho.mqtt.golang"
 )
 
-// publishHeartbeat invia un heartbeat periodico sul topic
-// omninode/nodes/{nodeID}/heartbeat con la lista degli agent supportati.
-func publishHeartbeat(client mqtt.Client, nodeID string, agents []string) {
-	topic := fmt.Sprintf("omninode/nodes/%s/heartbeat", nodeID)
-	payload := map[string]interface{}{
+func heartbeatTopic(nodeID string) string {
+	return fmt.Sprintf("omninode/v1/nodes/%s/heartbeat", nodeID)
+}
+
+func heartbeatPayload(nodeID string, agents []string) ([]byte, error) {
+	return json.Marshal(map[string]any{
 		"node_id":          nodeID,
 		"status":           "online",
 		"supported_agents": agents,
-		"timestamp":        time.Now().Format(time.RFC3339),
-	}
-	data, _ := json.Marshal(payload)
-	client.Publish(topic, 1, false, data)
+		"timestamp":        time.Now().UTC().Format(time.RFC3339),
+	})
 }
 
-// startHeartbeatLoop avvia una goroutine che pubblica heartbeat ogni 30s.
-func startHeartbeatLoop(client mqtt.Client, nodeID string, agents []string) {
+func publishHeartbeat(client mqtt.Client, nodeID string, agents []string) error {
+	payload, err := heartbeatPayload(nodeID, agents)
+	if err != nil {
+		return err
+	}
+	token := client.Publish(heartbeatTopic(nodeID), 1, false, payload)
+	if !token.Wait() || token.Error() != nil {
+		return token.Error()
+	}
+	return nil
+}
+
+func logHeartbeatError(err error) {
+	log.Printf("[MQTT] heartbeat non pubblicato: %v", err)
+}
+
+func startHeartbeatLoop(client mqtt.Client, nodeID string, agents []string, stop <-chan struct{}) {
 	ticker := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()
-	publishHeartbeat(client, nodeID, agents)
-	for range ticker.C {
-		publishHeartbeat(client, nodeID, agents)
+
+	if err := publishHeartbeat(client, nodeID, agents); err != nil {
+		logHeartbeatError(err)
+	}
+	for {
+		select {
+		case <-stop:
+			return
+		case <-ticker.C:
+			if err := publishHeartbeat(client, nodeID, agents); err != nil {
+				logHeartbeatError(err)
+			}
+		}
 	}
 }

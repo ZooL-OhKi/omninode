@@ -1,12 +1,18 @@
 [Unit]
-Description=OmniNode Fleet Worker Client (Live Pilot)
-After=network.target mosquitto.service
+Description=OmniNode Fleet Worker (mTLS v1)
+After=network-online.target mosquitto.service
+Wants=network-online.target
 
 [Service]
 Type=simple
 User=omninode
+Group=omninode
 WorkingDirectory=/opt/omninode/omniclient
-ExecStart=/opt/omninode/omniclient/omniclient --node-id=node2 --broker=wss://localhost:9001
+EnvironmentFile=/etc/omninode/omninode-worker.env
+ExecStartPre=/usr/bin/test -r /etc/omninode/certs/ca.crt
+ExecStartPre=/usr/bin/test -r /etc/omninode/certs/worker-1.crt
+ExecStartPre=/usr/bin/test -r /etc/omninode/certs/worker-1.key
+ExecStart=/opt/omninode/omniclient/omniclient
 Restart=always
 RestartSec=5
 StandardOutput=journal

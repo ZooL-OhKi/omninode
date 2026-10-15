@@ -6,7 +6,7 @@ import main
 
 @pytest.fixture
 def client(monkeypatch):
-    monkeypatch.setattr(main, "API_KEY", "test-key")
+    monkeypatch.setattr(main, "MCP_SECRET", "test-key")
     return TestClient(main.app)
 
 

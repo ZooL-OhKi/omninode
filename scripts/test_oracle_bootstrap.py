@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import os
 from pathlib import Path
 
 import pytest
@@ -33,11 +32,16 @@ def make_config(tmp_path: Path) -> bootstrap.BootstrapConfig:
     )
 
 
-def test_dry_run_does_not_install_files(tmp_path, monkeypatch):
-    config = make_config(tmp_path)
-    executed = []
+def isolate_system(monkeypatch, tmp_path: Path) -> list[list[str]]:
+    executed: list[list[str]] = []
     monkeypatch.setattr(bootstrap, "run", lambda command, dry_run: executed.append(command))
     monkeypatch.setattr(bootstrap, "user_exists", lambda user, dry_run: True)
+    return executed
+
+
+def test_dry_run_does_not_install_files(tmp_path, monkeypatch):
+    config = make_config(tmp_path)
+    executed = isolate_system(monkeypatch, tmp_path)
 
     bootstrap.bootstrap(config, apply=False, enable_services=False)
 
@@ -49,7 +53,7 @@ def test_bootstrap_is_idempotent(tmp_path, monkeypatch):
     config = make_config(tmp_path)
     installed = tmp_path / "systemd"
     installed.mkdir()
-    monkeypatch.setattr(bootstrap, "user_exists", lambda user, dry_run: True)
+    isolate_system(monkeypatch, tmp_path)
 
     original_install = bootstrap.install_file
 
@@ -75,8 +79,9 @@ def test_missing_certificate_blocks_apply(tmp_path):
         bootstrap.bootstrap(config, apply=True, enable_services=False)
 
 
-def test_enable_services_requires_apply(tmp_path):
+def test_enable_services_requires_apply(tmp_path, monkeypatch):
     config = make_config(tmp_path)
+    isolate_system(monkeypatch, tmp_path)
 
     with pytest.raises(bootstrap.BootstrapError, match="--enable-services richiede anche --apply"):
         bootstrap.bootstrap(config, apply=False, enable_services=True)

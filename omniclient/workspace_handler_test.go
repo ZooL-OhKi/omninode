@@ -38,9 +38,9 @@ func TestWorkspaceHandlerIgnoresDuplicateTask(t *testing.T) {
 	root := t.TempDir()
 	handler := NewWorkspaceHandler(root)
 	envelope := TaskEnvelope{
-		TaskID: "duplicate-1",
+		TaskID:   "duplicate-1",
 		TaskType: "workspace.write",
-		Payload: json.RawMessage(`{"path":"duplicate.txt","content":"first"}`),
+		Payload:  json.RawMessage(`{"path":"duplicate.txt","content":"first"}`),
 	}
 
 	if _, err := handler.Execute(envelope); err != nil {
@@ -75,9 +75,9 @@ func TestWorkspaceHandlerPersistsProcessedTasks(t *testing.T) {
 	root := t.TempDir()
 	handler := NewWorkspaceHandler(root)
 	envelope := TaskEnvelope{
-		TaskID: "persistent-1",
+		TaskID:   "persistent-1",
 		TaskType: "workspace.write",
-		Payload: json.RawMessage(`{"path":"persistent.txt","content":"first"}`),
+		Payload:  json.RawMessage(`{"path":"persistent.txt","content":"first"}`),
 	}
 	if _, err := handler.Execute(envelope); err != nil {
 		t.Fatal(err)

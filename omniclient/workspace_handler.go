@@ -11,15 +11,15 @@ import (
 )
 
 type WorkspaceHandler struct {
-	root string
-	mu sync.Mutex
+	root      string
+	mu        sync.Mutex
 	processed map[string]struct{}
 	storePath string
 }
 
 func NewWorkspaceHandler(root string) *WorkspaceHandler {
 	handler := &WorkspaceHandler{
-		root: root,
+		root:      root,
 		processed: make(map[string]struct{}),
 		storePath: filepath.Join(root, ".omninode", "processed-tasks.json"),
 	}
@@ -66,7 +66,7 @@ func (h *WorkspaceHandler) Execute(envelope TaskEnvelope) (json.RawMessage, erro
 		h.mu.Unlock()
 		return json.Marshal(map[string]string{
 			"task_id": envelope.TaskID,
-			"status": "duplicate_ignored",
+			"status":  "duplicate_ignored",
 		})
 	}
 	h.processed[envelope.TaskID] = struct{}{}

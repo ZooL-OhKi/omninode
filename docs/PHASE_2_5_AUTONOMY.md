@@ -10,39 +10,47 @@ Branch: feature/phase-2.5-autonomy (from feature/browse-rpc-mqtt). Not merged.
 - work_loop.py: SelfHostingWorkLoop and PerplexityHelper (urllib only). Legacy AutonomousWorkLoop untouched.
 - autonomy_api.py: POST /api/v1/autonomy/run-step, POST /api/v1/autonomy/goals, GET /api/v1/autonomy/goals/{id}.
 - autonomy_app.py: wires the router into main.app without editing main.py. Run: uvicorn autonomy_app:app
-- test_autonomy.py, test_autonomy_api.py.
+- test_autonomy.py, test_autonomy_api.py, test_main.py (rewritten for existing endpoints, MQTT mocked).
 
-## Verification status (read this first)
+## Delivered (omniclient/)
 
-- 43 tests passed in an isolated sandbox against copies of these files and minimal copies of audit.py,
-  policy_engine.py and task_store.py. The 5 HTTP endpoint tests were NOT executed there (FastAPI missing).
-- NOT run on the real repo: pytest (full suite), python -m compileall, go test, go vet, git diff --check.
-- Run them before merging. Do not merge on red.
+- cdp_agent.go, web_agent.go: playwright import renamed to github.com/mxschmitt/playwright-go.
+- mqtt_client.go: removed duplicate publishHeartbeat and startHeartbeatLoop (kept in heartbeat.go).
+- ops_terraform.go: removed duplicate publishRes (kept in mqtt_client.go).
+- main.go: StartWSServer(8080) called without assignment (function returns nothing).
+- go.mod / go.sum: added mxschmitt/playwright-go v0.6201.1, modernc.org/sqlite v1.60.1 and transitive deps.
+
+## Verification status (all green)
+
+- Python: 59 passed, 1 skipped, 0 failed (pytest -q, real repo, Windows).
+- Go: go vet clean, go test ok (github.com/ZooL-OhKi/omniclient 1.233s).
+- git diff --check: clean.
+- The 1 skipped test is pre-existing and unrelated to Phase 2.5.
 
 ## Not delivered
 
-- Go side: MCP tools omninode_workspace_*, omninode_command_verify, omninode_autonomy_step and local dispatch in
-  omniclient. Not written because it cannot be compiled or tested from the authoring environment.
+- Go MCP tools omninode_workspace_*, omninode_command_verify, omninode_autonomy_step and local dispatch in omniclient.
 - MQTT dispatch for workspace.* / command.run on node-local. The endpoints run the loop in-process on the gateway.
-- Updates to NEXT_STEPS.md and PROJECT_HANDOVER.md (both are stale: e.g. NEXT_STEPS says the task store is not
-  persistent, but task_store.py uses SQLite).
+- requirements.txt still pins aiomqtt==2.4.2 (nonexistent); local install used 2.4.0. Fix in a separate commit.
 - MQTT topics are still omninode/nodes/... in main.py, not omninode/v1/nodes/{node_id}/...
+- node1-gateway/.env is still tracked; rotate credentials and remove from history.
+- MCP_SECRET still has a hard-coded default in main.py.
 
 ## Ordered queue for the next tasks
 
 Human-only (security files are protected from autonomous edits):
-1. Remove node1-gateway/.env from the repo and git history, rotate every credential it contained.
-2. Remove the hard-coded default MCP_SECRET in main.py and require it from the environment.
-3. Authenticate POST /api/v1/approve.
-4. In workspace_manager.py: move the symlink check before resolve() (it can never trigger today) and use atomic writes.
-5. Delete or align the two legacy executors (command_executor.py, test_executor.py): both allow python/go with free arguments.
+1. Fix requirements.txt: aiomqtt==2.4.0.
+2. Remove node1-gateway/.env from the repo and git history, rotate every credential it contained.
+3. Remove the hard-coded default MCP_SECRET in main.py and require it from the environment.
+4. Authenticate POST /api/v1/approve.
+5. In workspace_manager.py: move the symlink check before resolve() and use atomic writes.
+6. Delete or align the two legacy executors (command_executor.py, test_executor.py).
 
 Autonomous candidates (after the Go side exists and verify_all is green):
-6. Run the Phase 2.5 test suite in CI and gate merges on it.
-7. Phase 3 groundwork: versioned RPC schema and error codes (schema_version 1 envelope).
-8. Audit Transparency Log: Ed25519-signed entries chained in a Merkle tree.
-9. Swarm Fabric v4.0 backlog, with three mandatory fixes:
-   - keep per-node topics omninode/v1/nodes/{node_id}/tasks|responses|heartbeat over MQTT over WSS (443), not flat omni/swarm/* topics;
-   - lifecycle_windows.go: obtain a handle with windows.OpenProcess and use golang.org/x/sys/windows Job Objects
-     (JOBOBJECT_EXTENDED_LIMIT_INFORMATION, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE), never pass a PID as a handle;
-   - spatial_pruner.js isElementCovered(): sample the centre and inner points (2px offset), check width/height > 0 and visibility, not the exact outer corners.
+7. Run the Phase 2.5 test suite in CI and gate merges on it.
+8. Phase 3 groundwork: versioned RPC schema and error codes (schema_version 1 envelope).
+9. Audit Transparency Log: Ed25519-signed entries chained in a Merkle tree.
+10. Swarm Fabric v4.0 backlog, with three mandatory fixes:
+   - keep per-node topics omninode/v1/nodes/{node_id}/tasks|responses|heartbeat over MQTT over WSS (443);
+   - lifecycle_windows.go: use golang.org/x/sys/windows Job Objects with a real handle, never a PID;
+   - spatial_pruner.js isElementCovered(): sample centre and inner points, not exact outer corners.

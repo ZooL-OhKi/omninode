@@ -1,166 +1,51 @@
-# Project Handover - OmniNode
+# Omninode project handover
 
-## Stato Implementazione
+## Mission
 
-### Componenti Implementati (100%)
+Omninode hosts autonomous AI residents continuously on Oracle servers. The resident AI is intended to plan, execute, inspect, repair, and document work directly using the resources of its node: files, code, processes, browser sessions, and approved local tools. Omninode is not only a passive collection of remote commands.
 
-| Componente | Stato | Note |
-|------------|-------|------|
-| **omniclient (Go)** | ✅ Completo | MCP server, CDP agent, gateway client, MQTT client |
-| **node1-gateway (Python)** | ✅ Completo | FastAPI, MQTT service, task store, policy engine, browser runtime |
-| **Browser Automation** | ✅ Completo | browser_navigate, browser_click, browser_type, browser_screenshot |
-| **Operations Terraform** | ✅ Completo | ops_terraform_plan, ops_terraform_apply |
-| **Audit Logging** | ✅ Completo | Log JSONL immutabile su file |
-| **Workspace Manager** | ✅ Completo | Gestione contesti multi-tenant |
-| **Heartbeat** | ✅ Completo | Health check periodici client→gateway |
+Runtime controls remain mandatory: identity, capabilities, workspace restrictions, network policy, secret isolation, resource budgets, audit logging, and approval for destructive or high-risk actions.
 
-### Componenti Parziali (50-80%)
+## Verified baseline (Phase 2.5)
 
-| Componente | Stato | Lavoro Mancante |
-|------------|-------|-----------------|
-| **Autenticazione MCP** | 🔄 50% | Middleware auth da implementare, test integration |
-| **TLS MQTT** | 🔄 30% | Certificati da generare, config Mosquitto |
-| **HTTPS Gateway** | 🔄 20% | Reverse proxy nginx da configurare |
-| **Task Store Persistente** | 🔄 40% | Backend SQLite da implementare, migration da in-memory |
+- Python gateway exposes authenticated /mcp and public /api/v1/nodes; autonomy endpoints are wired via autonomy_app.py.
+- autonomy_core.py provides RepoWorkspace (confined list/read/write/rollback with PROTECTED_PATHS, symlink and traversal denial, secret filtering, redaction, snapshots) and VerificationExecutor (static presets only, shell=False, 16000-char output cap, verify_all fail-fast).
+- work_loop.py provides SelfHostingWorkLoop (READ_CONTEXT -> GENERATE_OR_REFINE_PATCH -> WORKSPACE_WRITE -> VERIFY_SUITE -> SELF_HEAL max 3 -> COMMIT_OR_ROLLBACK) and PerplexityHelper (urllib only, PERPLEXITY_API_KEY / PERPLEXITY_MODEL).
+- autonomy_api.py exposes POST /api/v1/autonomy/run-step, POST /api/v1/autonomy/goals, GET /api/v1/autonomy/goals/{id}; capabilities are granted for 15 minutes and checked by PolicyEngine; state is persisted in tasks.db via task_store.
+- omniclient builds and tests green: playwright import renamed to github.com/mxschmitt/playwright-go, duplicate declarations removed, StartWSServer call fixed, dependencies added to go.mod/go.sum.
+- test_main.py rewritten for existing endpoints (/api/v1/nodes, /mcp with MQTT mocked).
+- pytest: 59 passed, 1 skipped, 0 failed. go vet: clean. go test: ok. git diff --check: clean.
 
-### Componenti Non Implementati (0%)
+## Known issues (do not merge without fixing)
 
-| Componente | Priorità | Sforzo Stimato |
-|------------|----------|----------------|
-| **Multi-Sessione Browser** | Media | 7-10 giorni |
-| **Monitoring (Prometheus)** | Media | 3-5 giorni |
-| **Rate Limiting** | Media | 2-3 giorni |
-| **Plugin System** | Bassa | 10-14 giorni |
-| **GraphQL API** | Bassa | 5-7 giorni |
-| **CLI Tool** | Bassa | 3-5 giorni |
+- requirements.txt pins aiomqtt==2.4.2, which does not exist on PyPI. Local install used 2.4.0.
+- node1-gateway/.env is tracked in git. Rotate every credential it contains and remove the file from history.
+- main.py has a hard-coded default MCP_SECRET ("super-secret-mcp-token"). Remove it and require the env var.
+- POST /api/v1/approve is unauthenticated.
+- workspace_manager.py checks is_symlink() after resolve(), so the check can never trigger; writes are not atomic.
+- command_executor.py and test_executor.py allow python/go with free arguments (arbitrary code execution). The new autonomy path does not use them, but they must be removed or aligned.
+- MQTT topics are still omninode/nodes/... in main.py, not omninode/v1/nodes/{node_id}/...
 
-## Prossimi Passi (Priorità)
+## Current phase
 
-### Settimana 1-2: Security Hardening
+Phase 2.5 (Self-Hosting Autonomy Bootstrap) is code-complete and test-green on the feature branch. It is NOT merged into feature/browse-rpc-mqtt.
 
-1. **Autenticazione MCP**
-   - Implementare middleware JWT in mcp_server.go
-   - Aggiungere config `mcp_auth_token` in config.yaml
-   - Testare con Claude Desktop
-   - Aggiornare MCP_SETUP.md
+Next phase: fix the known issues above, then Phase 3 (versioned RPC schema, Audit Transparency Log with Ed25519/Merkle) and the Swarm Fabric v4.0 backlog.
 
-2. **TLS MQTT**
-   - Generare certificati TLS (openssl)
-   - Configurare Mosquitto per mqtts://8883
-   - Aggiornare mqtt_client.go e mqtt_service.py per TLS
-   - Testare connessioni sicure
+## Validation
 
-3. **HTTPS Gateway**
-   - Installare nginx
-   - Configurare reverse proxy per gateway:8000
-   - Ottenere certificato Let's Encrypt
-   - Testare HTTPS
+```powershell
+Set-Location A:\omninode\node1-gateway
+& .\venv\Scripts\python.exe -m pytest -q
+& .\venv\Scripts\python.exe -m compileall .
 
-### Settimana 3-4: Reliability
+Set-Location A:\omninode\omniclient
+go vet ./...
+go test ./...
 
-4. **Persistenza Task Store**
-   - Scegliere backend (SQLite consigliato)
-   - Implementare interfaccia TaskStore (save, load, update, delete)
-   - Migrare task_store.py da in-memory a SQLite
-   - Testare recovery dopo crash
-
-5. **Retry Logic**
-   - Implementare exponential backoff in mqtt_client.go
-   - Aggiungere circuit breaker in gateway_client.go
-   - Testare scenari di fallimento gateway
-
-### Settimana 5-6: Testing e Documentazione
-
-6. **Test Suite**
-   - Completare unit test per mcp_server.go (target: 80% coverage)
-   - Completare integration test per gateway (target: 70% coverage)
-   - Aggiungere e2e test per browser_navigate, ops_terraform_plan
-
-7. **Documentazione**
-   - Aggiornare tutti i file docs/ con esempi reali
-   - Creare tutorial "Getting Started" (5 min)
-   - Registrare screencast demo (3 min)
-
-## Rischi
-
-### Tecnici
-
-| Rischio | Probabilità | Impatto | Mitigazione |
-|---------|-------------|---------|-------------|
-| **CDP instabile** | Media | Alto | Retry logic, fallback a Selenium (backlog) |
-| **MQTT message loss** | Bassa | Alto | Persistenza task store, QoS 2 MQTT |
-| **Memory leak Chrome** | Media | Medio | Restart automatico sessioni ogni 100 task |
-| **Terraform state lock** | Bassa | Medio | Timeout + force-unlock automatico |
-
-### Operativi
-
-| Rischio | Probabilità | Impatto | Mitigazione |
-|---------|-------------|---------|-------------|
-| **Single point of failure (gateway)** | Alta | Alto | Deploy ridondante (backlog Q2 2025) |
-| **Nessun monitoring** | Alta | Medio | Implementare Prometheus (Q1 2025) |
-| **Documentazione incompleta** | Media | Medio | Sprint documentazione (settimana 5-6) |
-| **Mancanza di runbook** | Media | Alto | Completare OPERATIONS_RUNBOOK.md (settimana 2) |
-
-### Sicurezza
-
-| Rischio | Probabilità | Impatto | Mitigazione |
-|---------|-------------|---------|-------------|
-| **CDP esposto su rete** | Media | Critico | Firewall localhost-only, audit regolare |
-| **MQTT senza TLS** | Alta | Alto | Implementare TLS (settimana 2) |
-| **Nessuna auth MCP** | Alta | Alto | Implementare auth (settimana 1) |
-| **Audit log manomesso** | Bassa | Alto | Backup remoto, checksum SHA256 |
-
-## Dipendenze Esterne
-
-| Dipendenza | Versione | Criticità | Alternative |
-|------------|----------|-----------|-------------|
-| **Chrome CDP** | 114+ | Alta | Firefox Marionette (backlog) |
-| **Mosquitto** | 2.0+ | Media | EMQX, VerneMQ |
-| **Terraform CLI** | 1.5+ | Media | OpenTofu (compatibile) |
-| **FastAPI** | 0.100+ | Media | Flask, Quart |
-
-## Checklist Handover
-
-- [ ] Tutti i file documentazione aggiornati
-- [ ] Test suite con coverage > 70%
-- [ ] CI/CD pipeline funzionante (GitHub Actions)
-- [ ] Ambiente staging deployato
-- [ ] Runbook operativo testato
-- [ ] Security audit completato
-- [ ] Backup e recovery testati
-- [ ] Monitoring e alerting configurati
-- [ ] Onboarding per nuovi sviluppatori (AI_ONBOARDING.md)
-
-## Contatti
-
-| Ruolo | Nome | Email | Slack |
-|-------|------|-------|-------|
-| **Tech Lead** | [Da assegnare] | [TBD] | [TBD] |
-| **Go Developer** | [Da assegnare] | [TBD] | [TBD] |
-| **Python Developer** | [Da assegnare] | [TBD] | [TBD] |
-| **DevOps** | [Da assegnare] | [TBD] | [TBD] |
-
-## Appendice: Comandi Utili
-
-```bash
-# Build tutto
-make build-all
-
-# Test tutto
-make test-all
-
-# Deploy staging
-make deploy-staging
-
-# Backup task store
-./scripts/backup_task_store.sh
-
-# Restore task store
-./scripts/restore_task_store.sh
-
-# Security scan
-make security-scan
-
-# Performance test
-make perf-test
+Set-Location A:\omninode
+git diff --check
+git status --short
 ```
+
+No commit or push should occur without review of the complete diff.

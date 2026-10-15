@@ -1,5 +1,5 @@
 import os
-os.environ.setdefault("MCP_SECRET", "test-mcp-secret")
+os.environ["MCP_SECRET"] = "test-mcp-secret"
 
 import pytest
 from fastapi.testclient import TestClient

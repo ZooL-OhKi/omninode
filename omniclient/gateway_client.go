@@ -8,6 +8,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"time"
 )
 
@@ -48,6 +49,13 @@ type TaskStatus struct {
 	UpdatedAt string `json:"updated_at"`
 }
 
+// AutonomyRunStepRequest è il payload per un passo atomico di autonomia.
+type AutonomyRunStepRequest struct {
+	TargetFile   string   `json:"target_file"`
+	Content      string   `json:"content"`
+	ContextFiles []string `json:"context_files,omitempty"`
+}
+
 // Gateway definisce il contratto per parlare con il control plane di Omninode
 type Gateway interface {
 	RestartNode(nodeID string) error
@@ -55,6 +63,11 @@ type Gateway interface {
 	Browse(ctx context.Context, url, format string) (*BrowseResult, error)
 	DispatchTask(ctx context.Context, nodeID string, taskType string, payload map[string]any) (*DispatchResponse, error)
 	GetTaskStatus(ctx context.Context, taskID string) (*TaskStatus, error)
+	AutonomyRunStep(ctx context.Context, targetFile, content string, contextFiles []string) (map[string]any, error)
+	WorkspaceList(ctx context.Context, subpath string) (map[string]any, error)
+	WorkspaceRead(ctx context.Context, path string) (map[string]any, error)
+	WorkspaceRollback(ctx context.Context, path string) (map[string]any, error)
+	CommandVerify(ctx context.Context, preset string) (map[string]any, error)
 }
 
 // HTTPGateway è l'implementazione del client verso il cluster
@@ -98,7 +111,7 @@ func (g *HTTPGateway) SetAPIKey(apiKey string) {
 
 // doJSON è il motore di rete interno, testabile e agnostico rispetto agli endpoint reali
 func (g *HTTPGateway) doJSON(ctx context.Context, method, path string, reqBody any, resBody any) error {
-	url := g.baseURL + path
+	fullURL := g.baseURL + path
 
 	var bodyReader io.Reader
 	if reqBody != nil {
@@ -109,7 +122,7 @@ func (g *HTTPGateway) doJSON(ctx context.Context, method, path string, reqBody a
 		bodyReader = bytes.NewReader(jsonData)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, method, url, bodyReader)
+	req, err := http.NewRequestWithContext(ctx, method, fullURL, bodyReader)
 	if err != nil {
 		return fmt.Errorf("errore creazione request: %w", err)
 	}
@@ -172,6 +185,79 @@ func (g *HTTPGateway) GetTaskStatus(ctx context.Context, taskID string) (*TaskSt
 	return &res, nil
 }
 
+// AutonomyRunStep esegue un passo atomico write + verify_all + rollback on failure.
+func (g *HTTPGateway) AutonomyRunStep(ctx context.Context, targetFile, content string, contextFiles []string) (map[string]any, error) {
+	if targetFile == "" {
+		return nil, fmt.Errorf("target_file è obbligatorio")
+	}
+	if content == "" {
+		return nil, fmt.Errorf("content è obbligatorio")
+	}
+
+	var res map[string]any
+	req := AutonomyRunStepRequest{
+		TargetFile:   targetFile,
+		Content:      content,
+		ContextFiles: contextFiles,
+	}
+	if err := g.doJSON(ctx, http.MethodPost, "/api/v1/autonomy/run-step", req, &res); err != nil {
+		return nil, err
+	}
+	return res, nil
+}
+
+// WorkspaceList elenca i file del workspace repository.
+func (g *HTTPGateway) WorkspaceList(ctx context.Context, subpath string) (map[string]any, error) {
+	var res map[string]any
+	path := "/api/v1/autonomy/workspace/list"
+	if subpath != "" {
+		path += "?subpath=" + url.QueryEscape(subpath)
+	}
+	if err := g.doJSON(ctx, http.MethodGet, path, nil, &res); err != nil {
+		return nil, err
+	}
+	return res, nil
+}
+
+// WorkspaceRead legge un file testuale dal workspace repository.
+func (g *HTTPGateway) WorkspaceRead(ctx context.Context, path string) (map[string]any, error) {
+	if path == "" {
+		return nil, fmt.Errorf("path è obbligatorio")
+	}
+	var res map[string]any
+	endpoint := "/api/v1/autonomy/workspace/read?path=" + url.QueryEscape(path)
+	if err := g.doJSON(ctx, http.MethodGet, endpoint, nil, &res); err != nil {
+		return nil, err
+	}
+	return res, nil
+}
+
+// WorkspaceRollback ripristina l’ultimo snapshot di un file.
+func (g *HTTPGateway) WorkspaceRollback(ctx context.Context, path string) (map[string]any, error) {
+	if path == "" {
+		return nil, fmt.Errorf("path è obbligatorio")
+	}
+	var res map[string]any
+	req := map[string]string{"path": path}
+	if err := g.doJSON(ctx, http.MethodPost, "/api/v1/autonomy/workspace/rollback", req, &res); err != nil {
+		return nil, err
+	}
+	return res, nil
+}
+
+// CommandVerify esegue esclusivamente un preset statico di verifica.
+func (g *HTTPGateway) CommandVerify(ctx context.Context, preset string) (map[string]any, error) {
+	if preset == "" {
+		return nil, fmt.Errorf("preset è obbligatorio")
+	}
+	var res map[string]any
+	req := map[string]string{"preset": preset}
+	if err := g.doJSON(ctx, http.MethodPost, "/api/v1/autonomy/command/verify", req, &res); err != nil {
+		return nil, err
+	}
+	return res, nil
+}
+
 // --- METODI PUBBLICI MOCKATI (IN ATTESA DI SPECIFICHE) ---
 
 func (g *HTTPGateway) RestartNode(nodeID string) error {
@@ -189,11 +275,11 @@ func (g *HTTPGateway) Execute(ctx context.Context, language, code string) (*Exec
 	}, nil
 }
 
-func (g *HTTPGateway) Browse(ctx context.Context, url, format string) (*BrowseResult, error) {
+func (g *HTTPGateway) Browse(ctx context.Context, pageURL, format string) (*BrowseResult, error) {
 	// TODO: Cablare la chiamata reale doJSON quando documentata
 	return &BrowseResult{
 		Title:   "Pagina estratta da Omninode",
-		Content: "# Contenuto Markdown (Mock)\nQuesto è il parsing di: " + url,
+		Content: "# Contenuto Markdown (Mock)\nQuesto è il parsing di: " + pageURL,
 		NodeID:  "node-browser-02",
 	}, nil
 }

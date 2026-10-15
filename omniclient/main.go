@@ -1,61 +1,44 @@
 package main
 
 import (
-	"log/slog"
-	"os"
-	"os/signal"
-	"syscall"
+"log"
+"os"
+"os/signal"
+"syscall"
+"time"
 )
 
 func main() {
-	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
-	slog.SetDefault(logger)
+log.Println("[OmniClient] Avvio del nodo Go worker in corso...")
 
-	slog.Info("Avvio Omninode Worker...")
-
-	// Inizializza database SQLite per HITL
-	if err := InitDB("file:omninode.db?mode=rwc"); err != nil {
-		slog.Error("Impossibile inizializzare database", "err", err)
-		os.Exit(1)
-	}
-
-	// Inizializza browser CDP
-	if err := InitWebAgent(); err != nil {
-		slog.Error("Impossibile avviare WebAgent", "err", err)
-		os.Exit(1)
-	}
-
-	// Avvia WebSocket locale (opzionale, per debug)
-	go StartWSServer(8080)
-
-	// Configura parametri MQTT da variabili d'ambiente
-	nodeID := getEnv("OMNI_NODE_ID", "ryzen")
-	brokerURL := getEnv("OMNI_MQTT_BROKER", "tls://oracle-b.plini.net:8883")
-	caPath := getEnv("OMNI_MQTT_CA", "certs/ca.crt")
-	certPath := getEnv("OMNI_MQTT_CERT", "certs/client.crt")
-	keyPath := getEnv("OMNI_MQTT_KEY", "certs/client.key")
-
-	// Avvia worker MQTT
-	worker, err := StartMQTTWorker(brokerURL, nodeID, caPath, certPath, keyPath)
-	if err != nil {
-		slog.Error("Errore connessione MQTT", "err", err)
-		os.Exit(1)
-	}
-	defer client.Disconnect(250)
-
-	// Avvia heartbeat loop
-	go startHeartbeatLoop(client, nodeID, []string{"agent_1", "devops_bot"})
-
-	// Attendi segnale di terminazione
-	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
-	<-sigChan
-	slog.Info("Spegnimento Omninode Worker...")
+brokerURL := os.Getenv("OMNINODE_MQTT_BROKER")
+if brokerURL == "" {
+brokerURL = "tcp://127.0.0.1:1883"
 }
 
-func getEnv(key, fallback string) string {
-	if v := os.Getenv(key); v != "" {
-		return v
-	}
-	return fallback
+clientID := os.Getenv("OMNINODE_NODE_ID")
+if clientID == "" {
+clientID = "omni-worker-go-1"
+}
+
+username := os.Getenv("OMNINODE_MQTT_USER")
+password := os.Getenv("OMNINODE_MQTT_PASS")
+caCertPath := os.Getenv("OMNINODE_MQTT_CA_PATH")
+
+client, err := StartMQTTWorker(brokerURL, clientID, username, password, caCertPath)
+if err != nil {
+log.Fatalf("[OmniClient] Errore critico di connessione MQTT: %v", err)
+}
+defer client.Disconnect(250)
+
+log.Printf("[OmniClient] Nodo %s connesso con successo al broker %s", clientID, brokerURL)
+
+// Canale per gracefull shutdown
+sigChan := make(chan os.Signal, 1)
+signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+
+<-sigChan
+log.Println("[OmniClient] Segnale di arresto ricevuto, chiusura in corso...")
+time.Sleep(500 * time.Millisecond)
+log.Println("[OmniClient] Spegnimento completato.")
 }

@@ -4,6 +4,24 @@ from fastapi.testclient import TestClient
 import main
 
 
+class FakeMQTTClient:
+    def __init__(self, *args, **kwargs):
+        pass
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *args):
+        return False
+
+    async def publish(self, *args, **kwargs):
+        class _T:
+            def __init__(self):
+                self.rc = 0
+
+        return _T()
+
+
 @pytest.fixture
 def client(monkeypatch):
     monkeypatch.setattr(main, "MCP_SECRET", "test-key")
@@ -21,7 +39,8 @@ def test_mcp_requires_token(client):
     assert response.status_code == 401
 
 
-def test_mcp_with_valid_token_is_not_unauthorized(client):
+def test_mcp_with_valid_token_uses_mqtt(client, monkeypatch):
+    monkeypatch.setattr(main.aiomqtt, "Client", FakeMQTTClient)
     response = client.post(
         "/mcp",
         headers={"Authorization": "Bearer test-key"},

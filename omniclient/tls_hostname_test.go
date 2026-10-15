@@ -1,13 +1,15 @@
 package main
 
 import (
-	"crypto"
+	"context"
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/pem"
+	"errors"
+	"io"
 	"math/big"
 	"net"
 	"os"
@@ -15,6 +17,8 @@ import (
 	"testing"
 	"time"
 )
+
+const testTLSTimeout = 3 * time.Second
 
 func writeTestCertificate(t *testing.T, dir, name string, der []byte, key *rsa.PrivateKey) (certPath, keyPath string) {
 	t.Helper()
@@ -39,6 +43,8 @@ func writeTestCertificate(t *testing.T, dir, name string, der []byte, key *rsa.P
 
 func TestBuildTLSConfigRejectsHostnameMismatch(t *testing.T) {
 	dir := t.TempDir()
+	ctx, cancel := context.WithTimeout(context.Background(), testTLSTimeout)
+	defer cancel()
 
 	caKey, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
@@ -124,48 +130,62 @@ func TestBuildTLSConfigRejectsHostnameMismatch(t *testing.T) {
 		MinVersion: tls.VersionTLS13,
 		MaxVersion: tls.VersionTLS13,
 	}
-	if !serverTLS.ClientCAs.AppendCertsFromPEM(mustPEM(t, caDER)) {
+	if !serverTLS.ClientCAs.AppendCertsFromPEM(mustPEM(caDER)) {
 		t.Fatal("failed to load test CA")
 	}
 
-	listener, err := tls.Listen("tcp", "127.0.0.1:0", serverTLS)
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer listener.Close()
 
+	serverDone := make(chan struct{})
 	go func() {
+		defer close(serverDone)
 		for {
 			conn, err := listener.Accept()
 			if err != nil {
 				return
 			}
-			conn.Close()
+			go func(rawConn net.Conn) {
+				defer rawConn.Close()
+				tlsConn := tls.Server(rawConn, serverTLS)
+				tlsConn.SetDeadline(time.Now().Add(testTLSTimeout))
+				if err := tlsConn.HandshakeContext(ctx); err != nil {
+					return
+				}
+				_, _ = io.Copy(io.Discard, tlsConn)
+			}(conn)
 		}
 	}()
 
-	_, err = tls.Dial("tcp", listener.Addr().String(), tlsConfig)
-	if err == nil {
+	dialer := &net.Dialer{Timeout: testTLSTimeout}
+	rawConn, err := dialer.DialContext(ctx, "tcp", listener.Addr().String())
+	if err != nil {
+		t.Fatalf("dial failed before TLS handshake: %v", err)
+	}
+	defer rawConn.Close()
+
+	clientTLS := tls.Client(rawConn, tlsConfig)
+	clientTLS.SetDeadline(time.Now().Add(testTLSTimeout))
+	handshakeErr := clientTLS.HandshakeContext(ctx)
+
+	if handshakeErr == nil {
 		t.Fatal("expected hostname mismatch rejection")
 	}
 	var hostnameError *x509.HostnameError
-	if !errorsAs(err, &hostnameError) {
-		t.Fatalf("expected x509 hostname error, got: %v", err)
+	if !errors.As(handshakeErr, &hostnameError) {
+		t.Fatalf("expected x509 hostname error, got: %v", handshakeErr)
+	}
+
+	select {
+	case <-serverDone:
+	case <-ctx.Done():
+		t.Fatal("test timed out waiting for TLS server")
 	}
 }
 
-func mustPEM(t *testing.T, der []byte) []byte {
-	t.Helper()
+func mustPEM(der []byte) []byte {
 	return pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})
 }
-
-func errorsAs(err error, target *x509.HostnameError) bool {
-	if hostname, ok := err.(*x509.HostnameError); ok {
-		*target = *hostname
-		return true
-	}
-	return false
-}
-
-var _ crypto.Signer = (*rsa.PrivateKey)(nil)
-var _ net.Addr = (*net.TCPAddr)(nil)

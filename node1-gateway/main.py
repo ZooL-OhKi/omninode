@@ -172,3 +172,6 @@ async def mcp_endpoint(request: Request):
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
+
+from audit_api import build_audit_router
+app.include_router(build_audit_router(verify_mcp_auth))

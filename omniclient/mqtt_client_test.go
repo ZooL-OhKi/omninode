@@ -24,12 +24,18 @@ func TestBuildTLSConfigFailsOnMissingFiles(t *testing.T) {
 	}
 }
 
-func TestTaskAndResponseTopicsUseV1(t *testing.T) {
-	if got := taskTopic("worker-1"); got != "omninode/v1/nodes/worker-1/tasks" {
-		t.Fatalf("unexpected task topic: %s", got)
+func TestV1Topics(t *testing.T) {
+	cases := map[string]func(string) string{
+		"omninode/v1/nodes/worker-1/tasks":        taskTopic,
+		"omninode/v1/nodes/worker-1/responses":    responseTopic,
+		"omninode/v1/nodes/worker-1/heartbeat":    heartbeatTopic,
+		"omninode/v1/nodes/worker-1/control":      controlTopic,
+		"omninode/v1/nodes/worker-1/control/ack": controlAckTopic,
 	}
-	if got := responseTopic("worker-1"); got != "omninode/v1/nodes/worker-1/responses" {
-		t.Fatalf("unexpected response topic: %s", got)
+	for expected, builder := range cases {
+		if got := builder("worker-1"); got != expected {
+			t.Fatalf("unexpected topic: got %s, want %s", got, expected)
+		}
 	}
 }
 
@@ -45,6 +51,21 @@ func TestTaskResponseIsStructuredJSON(t *testing.T) {
 	}
 	if decoded["task_id"] != "task-1" || decoded["status"] != "completed" {
 		t.Fatalf("unexpected response: %s", encoded)
+	}
+}
+
+func TestControlAcknowledgementIsStructuredJSON(t *testing.T) {
+	ack := ControlAcknowledgement{Type: "task_approval", TaskID: "task-1", Acknowledged: true}
+	encoded, err := json.Marshal(ack)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decoded map[string]any
+	if err := json.Unmarshal(encoded, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	if decoded["task_id"] != "task-1" || decoded["acknowledged"] != true {
+		t.Fatalf("unexpected acknowledgement: %s", encoded)
 	}
 }
 

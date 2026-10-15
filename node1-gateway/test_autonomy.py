@@ -1,5 +1,9 @@
+import json
 import os
 import sys
+import threading
+import time
+import urllib.error
 from pathlib import Path
 
 import pytest
@@ -7,7 +11,7 @@ import pytest
 from audit import AuditEventEngine
 from autonomy_core import (PROTECTED_PATHS, RepoWorkspace, VERIFICATION_PRESETS,
                            VerificationExecutor, redact)
-from work_loop import PerplexityHelper, SelfHostingWorkLoop
+from work_loop import BrowserWebAIHelper, PerplexityHelper, SelfHostingWorkLoop, browser_bridge
 from workspace_manager import WorkspaceManager
 
 
@@ -269,32 +273,70 @@ def test_workspace_manager_blocks_symlink_before_resolve(tmp_path):
         manager.write("link/file.txt", "blocked")
 
 
-def test_perplexity_helper_parses_response():
-    import io, json
-
+def test_browser_helper_uses_rpc_and_extracts_last_code_block():
     captured = {}
 
-    class Resp(io.BytesIO):
+    class Resp:
+        def __init__(self, payload):
+            self._payload = json.dumps(payload).encode()
+
         def __enter__(self):
             return self
-        def __exit__(self, *a):
+
+        def __exit__(self, *args):
             return False
 
-    def opener(req, timeout=0):
-        captured["auth"] = req.get_header("Authorization")
-        captured["body"] = json.loads(req.data)
-        payload = {"choices": [{"message": {"content": "```python\nX = 1\n```"}}]}
-        return Resp(json.dumps(payload).encode())
+        def read(self):
+            return self._payload
 
-    h = PerplexityHelper(api_key="k-test", opener=opener)
-    out = h.generate("do it", "a.py", {"b.py": "B"}, failure={"steps": [{"preset": "python_tests", "exit_code": 1, "stdout": "o", "stderr": "e"}]})
-    assert out == "X = 1\n"
-    assert captured["auth"] == "Bearer k-test"
-    assert captured["body"]["model"] == "sonar-reasoning-pro"
-    assert "FAILED" in captured["body"]["messages"][1]["content"]
+    def opener(request, timeout=0):
+        captured["url"] = request.full_url
+        captured["body"] = json.loads(request.data)
+        return Resp({"response": "Explanation\n<pre><code>first</code></pre>\n<pre><code>```python\nX = 1\n```</code></pre>"})
+
+    helper = BrowserWebAIHelper(opener=opener)
+    output = helper.generate("do it", "a.py", {"b.py": "B"})
+
+    assert output == "X = 1\n"
+    assert captured["url"].endswith("/browser/chat-prompt")
+    assert "api.perplexity.ai" not in captured["url"]
+    assert captured["body"]["prompt"].startswith("Target file: a.py")
+    assert captured["body"]["dom_stable_ms"] == 1800
 
 
-def test_perplexity_helper_requires_key(monkeypatch):
-    monkeypatch.delenv("PERPLEXITY_API_KEY", raising=False)
-    with pytest.raises(RuntimeError):
-        PerplexityHelper(api_key="").generate("p", "a.py", {})
+def test_browser_helper_inbox_outbox_fallback():
+    class FailingOpener:
+        def __call__(self, *args, **kwargs):
+            raise urllib.error.URLError("browser RPC unavailable")
+
+    published = []
+    helper = BrowserWebAIHelper(
+        opener=FailingOpener(),
+        mqtt_publish=lambda topic, payload: published.append((topic, payload)),
+    )
+
+    def responder():
+        item = None
+        for _ in range(100):
+            item = browser_bridge.pending()
+            if item:
+                break
+            time.sleep(0.01)
+        assert item is not None
+        browser_bridge.submit(item["goal_id"], "Explanation\n<pre><code>Y = 2</code></pre>")
+
+    thread = threading.Thread(target=responder)
+    thread.start()
+    output = helper.generate("fix it", "a.py", {})
+    thread.join(timeout=2)
+
+    assert output == "Y = 2\n"
+    assert published
+    assert published[0][0] == "omninode/nodes/node-local/tasks"
+    payload = json.loads(published[0][1])
+    assert payload["type"] == "browser.chat_prompt"
+    assert payload["dom_stable_ms"] == 1800
+
+
+def test_perplexity_helper_is_browser_bridge_alias():
+    assert PerplexityHelper is BrowserWebAIHelper

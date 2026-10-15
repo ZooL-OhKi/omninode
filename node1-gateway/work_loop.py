@@ -2,6 +2,7 @@ import time
 from workspace_manager import WorkspaceManager
 from test_executor import CommandExecutor
 
+
 class AutonomousWorkLoop:
     def __init__(self, workspace_manager: WorkspaceManager, test_executor: CommandExecutor):
         self.wm = workspace_manager
@@ -61,57 +62,173 @@ class AutonomousWorkLoop:
         }
 
 import os
-
-# ---------------------------------------------------------------------------
-# Phase 2.5 - Self-Hosting Autonomy Bootstrap
-# ---------------------------------------------------------------------------
 import json
-import re as _re
+import threading
+import urllib.error
 import urllib.request
+import uuid
+
+import re as _re
 from typing import Any, Callable, Optional
 
 from autonomy_core import RepoWorkspace, VerificationExecutor
 
 STATES = ("READ_CONTEXT", "GENERATE_OR_REFINE_PATCH", "WORKSPACE_WRITE", "VERIFY_SUITE", "SELF_HEAL", "COMMIT_OR_ROLLBACK")
-_THINK = _re.compile(r"<think>.*?</think>", _re.S)
+_THINK = _re.compile(r"</think>", _re.S)
 _FENCE = _re.compile(r"^```[A-Za-z0-9_+-]*\n(.*?)\n```\s*$", _re.S)
+_PRE_CODE = _re.compile(r"<pre[^>]*>\s*<code[^>]*>(.*?)</code>\s*</pre>", _re.S | _re.I)
 
 
-class PerplexityHelper:
-    """Autonomous API mode. Standard library only (urllib)."""
+def _decode_html(value: str) -> str:
+    return (
+        value.replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&quot;", '"')
+        .replace("&#39;", "'")
+        .replace("&amp;", "&")
+    )
 
-    ENDPOINT = "https://api.perplexity.ai/chat/completions"
 
-    def __init__(self, api_key: Optional[str] = None, model: Optional[str] = None,
-                 timeout: int = 120, opener: Optional[Callable[..., Any]] = None):
-        self.api_key = api_key if api_key is not None else os.getenv("PERPLEXITY_API_KEY", "")
-        self.model = model or os.getenv("PERPLEXITY_MODEL", "sonar-reasoning-pro")
+def _extract_code(text: str) -> str:
+    text = _THINK.sub("", text).strip()
+    code_blocks = _PRE_CODE.findall(text)
+    if code_blocks:
+        text = _decode_html(code_blocks[-1]).strip()
+    match = _FENCE.match(text)
+    return (match.group(1) if match else text) + "\n"
+
+
+class BrowserPromptBridge:
+    """Inbox/Outbox bridge for a browser extension or external Web UI driver."""
+
+    def __init__(self):
+        self._lock = threading.Lock()
+        self._pending: dict[str, dict[str, Any]] = {}
+        self._responses: dict[str, str] = {}
+        self._events: dict[str, threading.Event] = {}
+
+    def create(self, goal_id: str, prompt: str) -> None:
+        with self._lock:
+            self._pending[goal_id] = {"goal_id": goal_id, "prompt": prompt, "created_at": time.time()}
+            self._responses.pop(goal_id, None)
+            self._events[goal_id] = threading.Event()
+
+    def pending(self, goal_id: Optional[str] = None) -> Optional[dict[str, Any]]:
+        with self._lock:
+            item = self._pending.get(goal_id) if goal_id else next(iter(self._pending.values()), None)
+            return dict(item) if item else None
+
+    def submit(self, goal_id: str, response: str) -> None:
+        with self._lock:
+            if goal_id not in self._pending:
+                raise KeyError(f"no pending browser prompt for {goal_id}")
+            self._responses[goal_id] = response
+            self._pending.pop(goal_id, None)
+            event = self._events[goal_id]
+        event.set()
+
+    def wait(self, goal_id: str, timeout: float) -> str:
+        event = self._events.get(goal_id)
+        if event is None:
+            raise KeyError(f"no pending browser prompt for {goal_id}")
+        if not event.wait(timeout):
+            raise TimeoutError("browser DOM response timeout")
+        with self._lock:
+            response = self._responses.pop(goal_id, None)
+            self._events.pop(goal_id, None)
+        if response is None:
+            raise RuntimeError("browser DOM response missing")
+        return response
+
+
+browser_bridge = BrowserPromptBridge()
+
+
+class BrowserWebAIHelper:
+    """Zero-API browser Web UI bridge.
+
+    Transport priority:
+    1. Browser RPC (OMNINODE_BROWSER_RPC_URL or omniclient browser endpoint).
+    2. MQTT browser.chat_prompt dispatch.
+    3. Inbox/Outbox BrowserPromptBridge for a browser extension / external driver.
+    """
+
+    DEFAULT_RPC_URL = "http://127.0.0.1:8080/browser/chat-prompt"
+    DEFAULT_MQTT_TOPIC = "omninode/nodes/node-local/tasks"
+
+    def __init__(self, rpc_url: Optional[str] = None, mqtt_topic: Optional[str] = None,
+                 mqtt_publish: Optional[Callable[[str, str], Any]] = None,
+                 bridge: Optional[BrowserPromptBridge] = None, timeout: int = 180,
+                 opener: Optional[Callable[..., Any]] = None):
+        self.rpc_url = rpc_url or os.getenv("OMNINODE_BROWSER_RPC_URL", self.DEFAULT_RPC_URL)
+        self.mqtt_topic = mqtt_topic or self.DEFAULT_MQTT_TOPIC
+        self.mqtt_publish = mqtt_publish
+        self.bridge = bridge or browser_bridge
         self.timeout = timeout
         self._open = opener or urllib.request.urlopen
 
-    def generate(self, prompt: str, target_file: str, context: dict[str, str],
-                 failure: Optional[dict[str, Any]] = None) -> str:
-        if not self.api_key:
-            raise RuntimeError("PERPLEXITY_API_KEY is not configured")
-        ctx = "\n\n".join(f"### {p}\n{c}" for p, c in context.items())
+    def _build_prompt(self, prompt: str, target_file: str, context: dict[str, str],
+                      failure: Optional[dict[str, Any]]) -> str:
+        ctx = "\n\n".join(f"### {path}\n{content}" for path, content in context.items())
         user = f"Target file: {target_file}\n\nTask:\n{prompt}\n\nContext files:\n{ctx}"
         if failure:
             steps = failure.get("steps") or []
             bad = steps[-1] if steps else failure
-            user += ("\n\nThe previous attempt FAILED verification. Fix it.\n"
-                     f"preset={bad.get('preset')} exit_code={bad.get('exit_code')}\n"
-                     f"stdout:\n{bad.get('stdout', '')}\nstderr:\n{bad.get('stderr', '')}")
-        body = json.dumps({"model": self.model, "messages": [
-            {"role": "system", "content": "Return ONLY the complete new content of the target file, no explanations."},
-            {"role": "user", "content": user}]}).encode("utf-8")
-        req = urllib.request.Request(self.ENDPOINT, data=body, method="POST", headers={
-            "Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"})
-        with self._open(req, timeout=self.timeout) as resp:
-            data = json.loads(resp.read().decode("utf-8"))
-        text = data["choices"][0]["message"]["content"]
-        text = _THINK.sub("", text).strip()
-        m = _FENCE.match(text)
-        return (m.group(1) if m else text) + "\n"
+            user += (
+                "\n\nThe previous attempt FAILED verification. Fix it.\n"
+                f"preset={bad.get('preset')} exit_code={bad.get('exit_code')}\n"
+                f"stdout:\n{bad.get('stdout', '')}\nstderr:\n{bad.get('stderr', '')}"
+            )
+        return user
+
+    def _rpc_generate(self, prompt: str) -> str:
+        body = json.dumps({"prompt": prompt, "wait_for_dom_complete": True,
+                           "dom_stable_ms": 1800}).encode("utf-8")
+        request = urllib.request.Request(
+            self.rpc_url, data=body, method="POST",
+            headers={"Content-Type": "application/json", "Accept": "application/json"},
+        )
+        with self._open(request, timeout=self.timeout) as response:
+            data = json.loads(response.read().decode("utf-8"))
+        raw = data.get("response") or data.get("code") or data.get("raw") or ""
+        if not raw:
+            raise ValueError("browser RPC returned an empty response")
+        return raw
+
+    def generate(self, prompt: str, target_file: str, context: dict[str, str],
+                 failure: Optional[dict[str, Any]] = None) -> str:
+        structured_prompt = self._build_prompt(prompt, target_file, context, failure)
+
+        try:
+            return _extract_code(self._rpc_generate(structured_prompt))
+        except (urllib.error.URLError, OSError, ValueError, KeyError):
+            pass
+
+        bridge_goal_id = f"browser-{uuid.uuid4().hex[:12]}"
+        self.bridge.create(bridge_goal_id, structured_prompt)
+
+        if self.mqtt_publish is not None:
+            payload = json.dumps({
+                "type": "browser.chat_prompt",
+                "goal_id": bridge_goal_id,
+                "prompt": structured_prompt,
+                "target_file": target_file,
+                "wait_for_dom_complete": True,
+                "dom_stable_ms": 1800,
+            })
+            self.mqtt_publish(self.mqtt_topic, payload)
+
+        try:
+            response = self.bridge.wait(bridge_goal_id, timeout=self.timeout)
+        except TimeoutError:
+            if self.mqtt_publish is None:
+                raise RuntimeError("Browser Web Bridge unavailable: RPC failed and no MQTT publisher configured")
+            raise
+        return _extract_code(response)
+
+
+# Retrocompatible alias: OmniNode no longer calls the paid Perplexity HTTP API.
+PerplexityHelper = BrowserWebAIHelper
 
 
 class SelfHostingWorkLoop:
@@ -119,11 +236,11 @@ class SelfHostingWorkLoop:
     -> SELF_HEAL (max attempts) -> COMMIT_OR_ROLLBACK.
 
     External driver mode: pass `content`; one attempt, auto-rollback on failure.
-    API mode: pass `prompt` and a helper; failures are fed back for up to max_attempts.
+    Browser bridge mode: pass `prompt` and a helper; failures are fed back for up to max_attempts.
     """
 
     def __init__(self, workspace: RepoWorkspace, verifier: VerificationExecutor, audit: Any = None,
-                 helper: Optional[PerplexityHelper] = None, max_attempts: int = 3,
+                 helper: Optional[BrowserWebAIHelper] = None, max_attempts: int = 3,
                  recorder: Optional[Callable[[str, str, dict], None]] = None,
                  agent_id: str = "autonomy-agent"):
         self.ws = workspace
@@ -142,7 +259,7 @@ class SelfHostingWorkLoop:
         if self.recorder is not None:
             try:
                 self.recorder(goal_id, report["status"], report)
-            except Exception as exc:  # persistence must not mask the result
+            except Exception as exc:
                 report["recorder_error"] = str(exc)
         return report
 

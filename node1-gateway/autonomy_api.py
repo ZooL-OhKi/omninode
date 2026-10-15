@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import os
 import threading
+import time
 import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -15,7 +16,7 @@ import task_store
 from audit import AuditEventEngine
 from autonomy_core import RepoWorkspace, VerificationExecutor
 from policy_engine import PolicyEngine
-from work_loop import PerplexityHelper, SelfHostingWorkLoop
+from work_loop import BrowserWebAIHelper, SelfHostingWorkLoop, browser_bridge
 
 AGENT_ID = "autonomy-agent"
 NODE_ID = "node-local"
@@ -45,14 +46,19 @@ class GoalRequest(BaseModel):
     max_attempts: int = Field(default=3, ge=1, le=3)
 
 
+class DomResponseRequest(BaseModel):
+    goal_id: str = Field(min_length=1, max_length=128)
+    raw_dom_markdown_or_code: str = Field(min_length=1, max_length=1000000)
+
+
 class AutonomyService:
     def __init__(self, repo_root: Optional[Path] = None, audit: Optional[AuditEventEngine] = None,
-                 helper_factory: Optional[Callable[[], PerplexityHelper]] = None,
+                 helper_factory: Optional[Callable[[], BrowserWebAIHelper]] = None,
                  presets: Optional[dict] = None, persist: bool = True):
         self.repo_root = Path(repo_root) if repo_root else default_repo_root()
         self.audit = audit or AuditEventEngine()
         self.policy = PolicyEngine(self.audit)
-        self.helper_factory = helper_factory or PerplexityHelper
+        self.helper_factory = helper_factory or BrowserWebAIHelper
         self.presets = presets
         self.persist = persist
         if persist:
@@ -75,11 +81,7 @@ class AutonomyService:
         ws = RepoWorkspace(self.repo_root, guard=guard)
         ver = VerificationExecutor(self.repo_root, guard=guard, audit=self.audit, agent_id=AGENT_ID,
                                    goal_id=goal_id, presets=self.presets)
-        helper = None
-        if use_helper:
-            helper = self.helper_factory()
-            if not getattr(helper, "api_key", None):
-                raise HTTPException(503, "PERPLEXITY_API_KEY is not configured")
+        helper = self.helper_factory() if use_helper else None
         return SelfHostingWorkLoop(ws, ver, audit=self.audit, helper=helper, max_attempts=max_attempts,
                                    recorder=self._record if self.persist else None, agent_id=AGENT_ID)
 
@@ -94,7 +96,7 @@ class AutonomyService:
     def run_step(self, req: RunStepRequest) -> dict[str, Any]:
         goal_id = req.goal_id or f"step-{uuid.uuid4().hex[:12]}"
         if self.persist:
-            task_store.create_task(goal_id, "autonomy.run_step", {"target_file": req.target_file, "mode": "api" if req.content is None else "external"})
+            task_store.create_task(goal_id, "autonomy.run_step", {"target_file": req.target_file, "mode": "browser" if req.content is None else "external"})
         with _RUN_LOCK:
             loop = self._loop(goal_id, use_helper=req.content is None, max_attempts=3)
             return loop.run_step(goal_id, req.target_file, content=req.content, prompt=req.prompt,
@@ -145,5 +147,28 @@ def build_router(auth_dependency: Callable[..., Any], service: Optional[Autonomy
         if row is None:
             raise HTTPException(404, "goal not found")
         return row
+
+    @router.get("/pending-prompt")
+    def pending_prompt(goal_id: Optional[str] = None) -> dict[str, Any]:
+        prompt = browser_bridge.pending(goal_id)
+        if prompt is None:
+            raise HTTPException(404, "no pending browser prompt")
+        return prompt
+
+    @router.post("/submit-dom-response")
+    def submit_dom_response(req: DomResponseRequest) -> dict[str, Any]:
+        try:
+            browser_bridge.submit(req.goal_id, req.raw_dom_markdown_or_code)
+        except KeyError as exc:
+            raise HTTPException(404, str(exc)) from exc
+
+        deadline = time.monotonic() + 120
+        while time.monotonic() < deadline:
+            row = task_store.get_task(req.goal_id)
+            if row and row.get("status") in ("committed", "rolled_back", "rejected", "error"):
+                return row
+            time.sleep(0.25)
+
+        return {"goal_id": req.goal_id, "status": "accepted", "detail": "browser response submitted; autonomy step still running"}
 
     return router

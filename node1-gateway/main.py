@@ -117,12 +117,14 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="OmniNode Gateway", lifespan=lifespan)
 os.makedirs("static", exist_ok=True)
 app.mount("/static", StaticFiles(directory="static"), name="static")
-app.include_router(build_audit_router(verify_mcp_auth))
 
 
 async def verify_mcp_auth(authorization: str = Header(None)):
     if not authorization or authorization != f"Bearer {MCP_SECRET}":
         raise HTTPException(status_code=401, detail="Token MCP non valido o mancante")
+
+
+app.include_router(build_audit_router(verify_mcp_auth))
 
 
 @app.get("/")

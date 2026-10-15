@@ -10,6 +10,7 @@ import (
 	"os"
 
 	mqtt "github.com/eclipse/paho.mqtt.golang"
+	"time"
 )
 
 type WorkerConfig struct {
@@ -112,8 +113,8 @@ func NewMQTTClient(config WorkerConfig) (mqtt.Client, error) {
 	opts.SetCleanSession(false)
 	opts.SetAutoReconnect(true)
 	opts.SetConnectRetry(true)
-	opts.SetConnectRetryInterval(5)
-	opts.SetMaxReconnectInterval(60)
+	opts.SetConnectRetryInterval(5 * time.Second)
+	opts.SetMaxReconnectInterval(60 * time.Second)
 	opts.SetOnConnectHandler(func(client mqtt.Client) {
 		for topic, handler := range map[string]mqtt.MessageHandler{
 			taskTopic(config.NodeID): func(_ mqtt.Client, message mqtt.Message) {
@@ -216,8 +217,12 @@ func StartMQTTWorker(config WorkerConfig) (mqtt.Client, error) {
 	if err != nil {
 		return nil, err
 	}
-	if token := client.Connect(); !token.Wait() || token.Error() != nil {
-		return nil, token.Error()
-	}
+	token := client.Connect()
+if !token.WaitTimeout(20 * time.Second) {
+    return nil, fmt.Errorf("timeout connessione MQTT a %s dopo 20s", config.BrokerURL)
+}
+if err := token.Error(); err != nil {
+    return nil, fmt.Errorf("connessione MQTT non riuscita: %w", err)
+}
 	return client, nil
 }

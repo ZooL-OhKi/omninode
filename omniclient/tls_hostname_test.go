@@ -86,7 +86,7 @@ func TestBuildTLSConfigRejectsHostnameMismatch(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	serverCertPath, serverKeyPath := writeTestCertificate(t, dir, "server", serverDER, serverKey)
+	_, _ = writeTestCertificate(t, dir, "server", serverDER, serverKey)
 
 	clientKey, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {

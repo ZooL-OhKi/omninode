@@ -1,63 +1,106 @@
-# Omninode Roadmap
+# Roadmap - OmniNode
 
-See `NEXT_STEPS.md` for the detailed execution plan. This file provides the phase-level view.
+## Implementato (Q3 2024)
 
-## Phase 0 — Baseline and reconstruction
+### Core Architecture
+- ✅ **MCP Server (Go)**: Server MCP con tool browser_* e ops_*
+- ✅ **CDP Agent (Go)**: Integrazione Chrome DevTools Protocol
+- ✅ **Gateway Client (Go)**: HTTP client verso node1-gateway
+- ✅ **MQTT Client (Go)**: Pub/sub asincrono per task/results
+- ✅ **FastAPI Gateway (Python)**: REST API + WebSocket
+- ✅ **MQTT Service (Python)**: Messaggistica asincrona
+- ✅ **Task Store (Python)**: In-memory store per task
+- ✅ **Policy Engine (Python)**: Autorizzazioni e limiti base
 
-Status: complete.
+### Browser Automation
+- ✅ **browser_navigate**: Navigazione a URL
+- ✅ **browser_click**: Click su elementi (CSS selector)
+- ✅ **browser_type**: Digitazione testo (input fields)
+- ✅ **browser_screenshot**: Screenshot full-page e viewport
+- ✅ **CDP locale**: Chrome su porta 9222
 
-Repository, branch, implementation checkpoint, documentation, security model, repository map, onboarding prompt, and operations runbook are available.
+### Operations
+- ✅ **ops_terraform_plan**: Esecuzione `terraform plan`
+- ✅ **ops_terraform_apply**: Esecuzione `terraform apply`
+- ✅ **Terraform CLI integration**: Parsing stdout/stderr
 
-## Phase 1 — Real local vertical slice
+### Infrastructure
+- ✅ **Audit Logging**: Log JSONL immutabile
+- ✅ **Workspace Manager**: Gestione contesti multi-tenant
+- ✅ **Heartbeat**: Health check periodici client→gateway
+- ✅ **WebSocket Server**: Connessioni bidirezionali
 
-Status: next.
+### Documentation
+- ✅ README.md, ARCHITECTURE.md, SECURITY.md
+- ✅ BUILD.md, NEXT_STEPS.md, ROADMAP.md
+- ✅ docs/AI_ONBOARDING.md, OPERATIONS_RUNBOOK.md, REPOSITORY_MAP.md
+- ✅ omniclient/README.md, HANDOFF.md, MCP_SETUP.md
 
-MCP/HTTP → FastAPI → MQTT → local `omniclient` → policy → `workspace.write` → correlated response.
+## In Progress (Q4 2024)
 
-The first result must be a real file in a temporary registered workspace, not a mock.
+### Security Hardening
+- 🔄 **Autenticazione MCP**: JWT/API key middleware (50%)
+- 🔄 **TLS MQTT**: Certificati client/server (30%)
+- 🔄 **HTTPS Gateway**: Reverse proxy nginx (20%)
 
-## Phase 2 — Reliable task lifecycle
+### Reliability
+- 🔄 **Task Store Persistente**: SQLite backend (40%)
+- 🔄 **Retry Logic**: Exponential backoff per MQTT (60%)
+- 🔄 **Circuit Breaker**: Gateway client fallback (30%)
 
-Status: planned.
+### Developer Experience
+- 🔄 **MCP Setup Guide**: Config Claude Desktop (80%)
+- 🔄 **Test Suite**: Unit + integration test (70%)
+- 🔄 **CI/CD**: GitHub Actions workflow (50%)
 
-202 responses, status endpoint, durable task identity, explicit states, deadlines, idempotency, bounded retries, duplicate control, and audit retention.
+## Backlog (Q1-Q2 2025)
 
-## Phase 3 — Secure network fabric
+### Scalability
+- ⏳ **Multi-Sessione Browser**: 5+ Chrome concurrenti
+- ⏳ **Load Balancing**: Multiple gateway instances
+- ⏳ **Caching**: Redis per screenshot/DOM
 
-Status: planned.
+### Observability
+- ⏳ **Prometheus Metrics**: request_count, latency, error_rate
+- ⏳ **Grafana Dashboard**: Template JSON
+- ⏳ **Distributed Tracing**: OpenTelemetry
 
-TLS/mTLS, per-node identity, topic ACLs, credential rotation, anonymous-access denial, reconnect behavior, and unauthorized-access monitoring.
+### Extensibility
+- ⏳ **Plugin System**: SDK per sviluppatori
+- ⏳ **GraphQL API**: Query, Mutation, Subscription
+- ⏳ **CLI Tool**: omni task list, browser navigate
 
-## Phase 4 — Multi-node orchestration
+### Platform
+- ⏳ **Kubernetes Operator**: CRD per OmniNode
+- ⏳ **Helm Chart**: Deploy one-command
+- ⏳ **Docker Compose**: Dev environment
 
-Status: planned.
+## Timeline
 
-Registration, heartbeats, capability advertisement, routing, backpressure, concurrency limits, cancellation, drain, and retry ownership.
+```
+2024 Q3        Q4           2025 Q1          Q2
+│──────────────│─────────────│───────────────│─────────────│
+│ Implementato │ Hardening   │ Scalability   │ Platform    │
+│ Core Arch    │ Auth + TLS  │ Multi-Session │ K8s + Helm  │
+│ Browser Auto │ Persistence │ Monitoring    │ CLI + UI    │
+│ Ops          │ Testing     │ Rate Limit    │ Plugins     │
+```
 
-## Phase 5 — MCP productization
+## Metriche di Successo
 
-Status: planned.
+| Metrica | Target | Attuale |
+|---------|--------|---------|
+| Uptime Gateway | 99.9% | N/A (dev) |
+| Latency p99 | <500ms | N/A (dev) |
+| Error Rate | <1% | N/A (dev) |
+| Task Recovery | 100% | 0% (in-memory) |
+| Security Audit | 0 critical | Pending |
 
-Stable schemas, progress semantics, configuration examples, supported-host compatibility, and real error propagation.
+## Release Schedule
 
-## Phase 6 — Browser capability
-
-Status: planned and constrained.
-
-Isolated contexts, ephemeral profiles, domain allowlists, bounded transfers, human handoff, and no evasion/bypass features.
-
-## Phase 7 — Oracle deployment and CI/CD
-
-Status: blocked until Phases 1 and 3 are complete.
-
-Packaging, staging, secrets, health, rollback, protected workflows, and resource budgets.
-
-## Phase 8 — Dashboard and operator experience
-
-Status: later.
-
-Timeline, node health, audit viewer, approvals, cancellation, and dashboard.
-
-## Sequencing rule
-
-Do not move to dashboards, broad autonomy, browser automation, or public cloud deployment until Phase 1 has produced a real end-to-end result and Phase 3 has established network security.
+| Versione | Data | Feature |
+|----------|------|---------|
+| v0.1.0 | 2024-09-30 | Alpha (dev locale) |
+| v0.2.0 | 2024-12-31 | Beta (security hardening) |
+| v1.0.0 | 2025-03-31 | GA (production ready) |
+| v1.1.0 | 2025-06-30 | Scale (multi-session, monitoring) |

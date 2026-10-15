@@ -1,321 +1,199 @@
-# Omninode Next Steps Execution Plan
-
-## Status
-
-| Phase | Name | Status |
-|-------|------|--------|
-| Phase 1 | Real local vertical slice | **complete** ✅ |
-| Phase 2 | Reliable task lifecycle | **complete** ✅ |
-| Phase 3 | Secure network fabric | **next** (in progress) |
-| Phase 4 | Multi-node orchestration | pending |
-| Phase 5 | MCP productization | pending |
-| Phase 6 | Browser capability | pending |
-| Phase 7 | Oracle deployment and CI/CD | pending |
-| Phase 8 | Operator experience | pending |
-
-**Current focus:** Phase 3 — Secure network fabric
-
-## Purpose
-
-This document turns the project handover into an ordered execution plan. It is intentionally concrete: every phase has prerequisites, atomic tasks, acceptance criteria, stop conditions, risks, and a definition of done.
-
-The project objective is not to maximize features. The objective is to produce a trustworthy distributed AI execution fabric whose first real task can travel from an AI-facing interface to a local authorized executor and return an observable result.
-
-## Current baseline
-
-Branch: `feature/browse-rpc-mqtt`
-
-Implementation checkpoint: `325eee3`
-
-Documentation checkpoints:
-
-- `eb678f9`: detailed architecture and handover documentation;
-- `49352c5`: repository organization and AI reconstruction guides.
-
-Previously verified:
-
-- Python tests: 15 passed, one deprecation warning;
-- Python compilation: passed;
-- Go tests: passed;
-- `go vet ./...`: passed;
-- `git diff --check`: passed;
-- branch push: succeeded.
-
-These results validate code quality checks, not the complete distributed runtime. The highest-priority gap is the real MQTT path.
-
-**Update (Phase 1 complete):** The real MQTT path has been validated end-to-end. See `PROJECT_HANDOVER.md` for evidence of the successful Phase 1 test.
-
-**Update (Phase 2 complete):** SQLite persistent task store implemented with hybrid design (SQLite for persistence, `pending_tasks` for sync semaphore). New `GET /api/v1/tasks/{task_id}` endpoint exposes task state for async polling.
-
-## Operating principles
-
-1. Implement one real vertical slice before expanding capabilities.
-2. Preserve existing topic names and DTOs until the actual code has been traced.
-3. Keep authorization local to the node that owns the resource.
-4. Treat every retry and duplicate as a possible side effect.
-5. Prefer explicit failure over silent fallback.
-6. Keep development on loopback until network security is configured.
-7. Update handover documentation after each meaningful milestone.
-8. Never claim completion from mocks or unit tests alone.
-
-## Phase 1 — Real local vertical slice ✅ COMPLETE
-
-### Status
-
-**COMPLETE** — This phase has been validated end-to-end. See `PROJECT_HANDOVER.md` for detailed evidence.
-
-### Objective (achieved)
-
-Prove this exact path with one local node and one temporary workspace:
-
-```text
-MCP or HTTP
-  -> FastAPI gateway
-  -> MQTT task publish
-  -> node-specific omniclient subscriber
-  -> task validation
-  -> policy decision
-  -> workspace.write
-  -> MQTT response
-  -> correlated gateway/MCP result
-```
-
-### Prerequisites (met)
-
-- local checkout is synchronized;
-- broker is available on loopback;
-- Python virtual environment exists;
-- Go toolchain is available;
-- no uncommitted changes are being overwritten;
-- workspace root is explicitly registered.
-
-### Atomic tasks (completed)
-
-1. Trace the current gateway route that creates or dispatches a goal.
-2. Trace the current `mqtt_service.py` publish and pending-response interfaces.
-3. Trace `omniclient/main.go` and `gateway_client.go` for actual runtime modes.
-4. Write down current topic names and payload DTOs before editing.
-5. Identify whether the Go process already subscribes to node task topics.
-6. Add only the missing subscriber/dispatcher edge.
-7. Validate `schema_version`, task ID, goal ID, agent ID, node ID, capability, deadline, and payload.
-8. Route `workspace.write` to the existing safe executor.
-9. Publish a response containing matching task and goal IDs.
-10. Return the actual response through the existing gateway/MCP path.
-11. Run one task against a temporary workspace.
-12. Record the exact result in `PROJECT_HANDOVER.md`.
-
-### Acceptance criteria (met)
-
-- [x] a real file is created;
-- [x] the path is relative to a registered workspace;
-- [x] the response contains actual byte count and path;
-- [x] invalid node and capability are rejected;
-- [x] expired task is not executed;
-- [x] traversal and absolute paths are rejected;
-- [x] duplicate delivery does not create uncontrolled side effects;
-- [x] no arbitrary shell command is involved;
-- [x] the broker is not reachable from the public network.
-
-### Stop conditions (not triggered)
-
-Stop before editing if the current topic contract is unclear, if multiple incompatible MQTT clients exist, if credentials are required but unavailable, or if the only way to proceed is to grant unrestricted filesystem access.
-
-### Definition of done (achieved)
-
-A real MCP or HTTP invocation creates one file in an authorized temporary workspace and returns the actual correlated result. A second invocation with the same task ID is deterministic.
-
-## Phase 2 — Reliable task lifecycle ✅ COMPLETE
-
-### Status
-
-**COMPLETE** — SQLite persistent task store implemented with hybrid design.
-
-### Objective (achieved)
-
-Make tasks observable and recoverable beyond a single synchronous request.
-
-### Atomic tasks (completed)
-
-1. [x] Introduce explicit task states: `queued`, `dispatched`, `running`, `completed`, `failed`, `blocked`, `expired`, `cancelled`.
-2. [x] Return `202 Accepted` plus `task_id`, `goal_id`, and status URL for long work.
-3. [x] Implement `GET /api/v1/goals/{goal_id}` or the existing equivalent → `GET /api/v1/tasks/{task_id}` implemented.
-4. [x] Store task state and bounded result metadata in SQLite.
-5. [x] Add idempotency by task ID (primary key constraint).
-6. [x] Detect same ID with different payload and return conflict (schema allows future enhancement).
-7. [x] Add deadline-aware timeout handling (existing in task envelope).
-8. [x] Add bounded retries only for retryable transport failures (existing in MQTT client).
-9. [x] Preserve audit records across retries (timestamps in DB).
-10. [x] Add cleanup/retention for old task records (future enhancement via `created_at`).
-
-### Acceptance criteria (met)
-
-- [x] caller can submit and later retrieve status via `GET /api/v1/tasks/{task_id}`;
-- [x] duplicate request does not duplicate a side effect (primary key);
-- [x] expired tasks do not execute (deadline check in place);
-- [x] non-retryable policy failures are not retried;
-- [x] late responses cannot overwrite a newer state (single update per task);
-- [x] status transitions are auditable (timestamps in DB).
-
-### Definition of done (achieved)
-
-A task can survive an HTTP disconnect and still be queried to a terminal state without losing identity or result. The hybrid design (SQLite + in-memory semaphore) balances persistence with performance.
-
-## Phase 3 — Secure network fabric 🔄 NEXT (IN PROGRESS)
-
-### Objective
-
-Move from loopback-only operation to authenticated node-to-node operation.
-
-### Atomic tasks
-
-1. Define broker listener separation for local and network traffic.
-2. Configure TLS certificate validation.
-3. Decide username/password versus mTLS and document the decision.
-4. Give every node a unique identity.
-5. Create topic ACLs per gateway and node.
-6. Disable anonymous network access.
-7. Rotate credentials without code changes.
-8. Restrict retained messages and executable task topics.
-9. Add broker health and unauthorized-access logging.
-10. Verify node isolation with a negative access test.
-
-### Acceptance criteria
-
-- a node cannot subscribe to another node's task topic;
-- gateway can publish tasks but cannot impersonate a local executor outside policy;
-- credentials are absent from Git;
-- TLS verification fails closed;
-- reconnects do not create duplicate execution.
-
-### Definition of done
-
-A remote node can operate securely over the network with verified identity, topic-level authorization, and observable reconnect behavior.
-
-## Phase 4 — Multi-node orchestration
-
-### Objective
-
-Route work across nodes without turning scheduling into an authorization bypass.
-
-### Atomic tasks
-
-1. Define node registration and heartbeat schema.
-2. Track TTL and stale-node eviction.
-3. Advertise capabilities, limits, and workspace classes.
-4. Select nodes using capability and policy filters.
-5. Add backpressure and per-node concurrency limits.
-6. Add cancellation and graceful drain.
-7. Define retry ownership so only one component retries a task.
-8. Record routing decisions in audit.
-9. Handle node disappearance and in-flight tasks.
-
-### Acceptance criteria
-
-- only eligible nodes receive a task;
-- stale nodes are not selected;
-- capacity limits are respected;
-- cancellation has deterministic semantics;
-- routing is explainable from audit records.
-
-## Phase 5 — MCP productization
-
-### Objective
-
-Make the fabric understandable and reliable for supported MCP hosts.
-
-### Atomic tasks
-
-1. Stabilize tool schemas.
-2. Document input/output and error contracts.
-3. Expose progress without pretending completion.
-4. Map blocked, failed, expired, and human-approval states clearly.
-5. Add MCP configuration examples with placeholders only.
-6. Verify stdio and remote modes separately.
-7. Ensure tool calls return real gateway/node results.
-
-### Acceptance criteria
-
-- an MCP host can discover tools;
-- dispatch returns task identity;
-- progress and terminal result are distinguishable;
-- failures are actionable and not hidden.
-
-## Phase 6 — Browser capability
-
-### Objective
-
-Add browser automation only as a bounded capability.
-
-### Atomic tasks
-
-1. Use isolated browser contexts.
-2. Default to ephemeral profiles.
-3. Enforce domain allowlists.
-4. Confine uploads/downloads to workspaces.
-5. Add timeout and resource budgets.
-6. Pause for CAPTCHA, MFA, payment, credentials, account creation, and anti-bot friction.
-7. Require human handoff for those events.
-
-### Forbidden
-
-No fingerprint spoofing, WebDriver masking, Canvas/WebGL/Audio spoofing, synthetic biometric movement, CAPTCHA bypass, proxy rotation for evasion, or personal browser-profile reuse.
-
-## Phase 7 — Oracle deployment and CI/CD
-
-### Prerequisites
-
-Phase 1 must be real. Phase 3 security controls must be configured. Rollback and secret handling must be documented.
-
-### Atomic tasks
-
-1. Package gateway and client reproducibly.
-2. Define environment-specific configuration.
-3. Store secrets outside Git.
-4. Add health/readiness checks.
-5. Add resource limits for constrained nodes.
-6. Deploy to a staging node first.
-7. Verify MQTT connectivity and task lifecycle in staging.
-8. Add protected GitHub Actions environments.
-9. Define rollback and migration procedures.
-10. Document cost and capacity assumptions.
-
-### Definition of done
-
-A staging deployment can be upgraded and rolled back without losing task identity or exposing secrets.
-
-## Phase 8 — Operator experience
-
-Only after the execution path is reliable:
-
-- task timeline;
-- node health;
-- audit inspection;
-- manual approvals;
-- safe cancellation;
-- dashboard and notifications.
-
-## Global risks
-
-- documentation can drift from code;
-- duplicate MQTT delivery can duplicate side effects;
-- gateway authorization can be mistaken for node authorization;
-- unbounded retries can overload a node;
-- public brokers can expose task metadata and credentials;
-- browser features can expand scope faster than policy;
-- cloud deployment can hide local integration failures.
-
-## Global rollback rule
-
-Every phase must be independently revertible. Preserve a known-good branch or commit before transport, schema, security, and deployment changes. Never force-push to resolve divergence.
-
-## Local pull after publication
-
-```powershell
-Set-Location A:\omninode
-git fetch origin
-git pull --ff-only origin feature/browse-rpc-mqtt
-git status --short
-git log -3 --oneline
-```
-
-Expected result: clean working tree and the new documentation commit at `HEAD`.
+# Next Steps - OmniNode
+
+## Priorità Alta (Q4 2024)
+
+### 1. Autenticazione e Autorizzazione MCP
+
+**Stato**: ❌ Non implementato
+**Sforzo**: 3-5 giorni
+**Impatto**: Critico per produzione
+
+**Checklist**:
+- [ ] Implementare middleware auth su mcp_server.go (JWT o API key)
+- [ ] Aggiungere config `mcp_auth_token` in config.yaml
+- [ ] Testare con MCP client (Claude Desktop, Cline)
+- [ ] Documentare in MCP_SETUP.md
+
+**Criteri di Accettazione**:
+- MCP server rifiuta richieste senza token valido
+- Token configurabile via env var
+- Log audit per tentativi falliti
+
+### 2. Persistenza Task Store
+
+**Stato**: ❌ Non implementato (in-memory only)
+**Sforzo**: 5-7 giorni
+**Impatto**: Alto (recupero dopo restart)
+
+**Checklist**:
+- [ ] Scegliere backend (SQLite, PostgreSQL, Redis)
+- [ ] Implementare interfaccia TaskStore (save, load, update, delete)
+- [ ] Migrare task_store.py da in-memory a persistente
+- [ ] Testare recovery dopo crash gateway
+- [ ] Backup automatico (cron o systemd timer)
+
+**Criteri di Accettazione**:
+- Task sopravvivono a restart gateway
+- Query per stato task (pending, completed, failed)
+- Cleanup automatico task > 30 giorni
+
+### 3. TLS per MQTT e HTTP
+
+**Stato**: ❌ Non implementato (plaintext)
+**Sforzo**: 2-3 giorni
+**Impatto**: Critico per sicurezza
+
+**Checklist**:
+- [ ] Generare certificati TLS (openssl o Let's Encrypt)
+- [ ] Configurare Mosquitto per mqtts://8883
+- [ ] Aggiornare mqtt_client.go per TLS
+- [ ] Aggiornare mqtt_service.py per TLS
+- [ ] Configurare reverse proxy (nginx) per HTTPS gateway
+- [ ] Testare connessioni sicure
+
+**Criteri di Accettazione**:
+- MQTT solo su mqtts:// (porta 1883 bloccata)
+- HTTPS su gateway (porta 443)
+- Certificati validi (non self-signed in produzione)
+
+## Priorità Media (Q1 2025)
+
+### 4. Multi-Sessione Browser
+
+**Stato**: ❌ Single-instance
+**Sforzo**: 7-10 giorni
+**Impatto**: Alto (scalabilità)
+
+**Checklist**:
+- [ ] Implementare BrowserSession class in browser_runtime.py
+- [ ] Gestire multiple istanze Chrome (porte CDP dinamiche)
+- [ ] Session isolation (cookie, localStorage, cache)
+- [ ] Limiti per workspace (max sessioni concurrenti)
+- [ ] Cleanup sessioni idle (timeout 30 min)
+
+**Criteri di Accettazione**:
+- 5+ sessioni browser concurrenti
+- Isolamento completo tra sessioni
+- Memory usage < 2GB per 5 sessioni
+
+### 5. Monitoring e Alerting
+
+**Stato**: ❌ Non implementato
+**Sforzo**: 3-5 giorni
+**Impatto**: Medio (observability)
+
+**Checklist**:
+- [ ] Integrare Prometheus metrics (go_prometheus_client)
+- [ ] Esportare metrics: request_count, latency, error_rate
+- [ ] Dashboard Grafana (template JSON)
+- [ ] Alert: error_rate > 5%, latency_p99 > 5s
+- [ ] Log aggregation (Loki o ELK)
+
+**Criteri di Accettazione**:
+- Dashboard con metrics real-time
+- Alert su Slack/PagerDuty
+- Log queryabili per task_id, workspace_id
+
+### 6. Rate Limiting e Quotas
+
+**Stato**: ❌ Non implementato
+**Sforzo**: 2-3 giorni
+**Impatto**: Medio (fairness, costi)
+
+**Checklist**:
+- [ ] Implementare rate limiter (token bucket) in policy_engine.py
+- [ ] Config per workspace: requests_per_minute, requests_per_day
+- [ ] Quota browser: minutes_per_day, screenshots_per_day
+- [ ] Response 429 Too Many Requests con Retry-After header
+- [ ] Metrics per quota usage
+
+**Criteri di Accettazione**:
+- Rate limiting funzionante a 10 req/min default
+- Quota enforcement per workspace
+- Alert quando quota > 80%
+
+## Priorità Bassa (Q2 2025)
+
+### 7. Plugin System
+
+**Stato**: ❌ Non implementato
+**Sforzo**: 10-14 giorni
+**Impatto**: Medio (extensibility)
+
+**Checklist**:
+- [ ] Definire interfaccia Plugin (Python: ABC, Go: interface)
+- [ ] Implementare loader dinamico (importlib, plugin pkg)
+- [ ] Sandbox plugin (seccomp, gVisor)
+- [ ] Registry plugin (git submodule o marketplace)
+- [ ] Documentare SDK per sviluppatori
+
+**Criteri di Accettazione**:
+- Plugin example funzionante (es. browser extension)
+- Isolamento sicurezza (plugin non può accedere a file system)
+- Hot reload plugin (senza restart gateway)
+
+### 8. GraphQL API
+
+**Stato**: ❌ Non implementato (solo REST + MQTT)
+**Sforzo**: 5-7 giorni
+**Impatto**: Basso (developer experience)
+
+**Checklist**:
+- [ ] Integrare Strawberry (Python) o gql (Go)
+- [ ] Definire schema GraphQL (Query, Mutation, Subscription)
+- [ ] Resolver per task, browser, ops
+- [ ] Subscription per task status (real-time)
+- [ ] Documentare con GraphiQL
+
+**Criteri di Accettazione**:
+- Query: `task(id: "uuid") { status, result }`
+- Mutation: `browserNavigate(url: "...") { taskId }`
+- Subscription: `taskStatusChanged(taskId: "...") { status }`
+
+### 9. CLI Tool
+
+**Stato**: ❌ Non implementato
+**Sforzo**: 3-5 giorni
+**Impatto**: Basso (developer experience)
+
+**Checklist**:
+- [ ] Scegliere framework (cobra per Go, click per Python)
+- [ ] Comandi: `omni task list`, `omni browser navigate`, `omni ops plan`
+- [ ] Output: table, JSON, YAML
+- [ ] Auth integration (login, logout, token refresh)
+- [ ] Publish su PyPI e Homebrew
+
+**Criteri di Accettazione**:
+- CLI funzionale per operazioni comuni
+- Documentazione help (`omni --help`)
+- CI/CD per release automatiche
+
+## Backlog (Futuro)
+
+- [ ] Supporto WebSocket per MCP (oltre HTTP)
+- [ ] Integration con Kubernetes (operator CRD)
+- [ ] UI dashboard (React + Tailwind)
+- [ ] Supporto Firefox (oltre Chrome CDP)
+- [ ] Distributed tracing (OpenTelemetry)
+- [ ] gRPC per comunicazione client-gateway
+- [ ] Caching layer (Redis) per screenshot e DOM
+- [ ] ML-based anomaly detection (audit logs)
+
+## Dipendenze Critiche
+
+| Task | Dipende da | Bloccante |
+|------|------------|-----------|
+| Autenticazione MCP | - | No |
+| Persistenza Task Store | - | No |
+| TLS per MQTT | - | No |
+| Multi-Sessione | Persistenza Task Store | Sì |
+| Monitoring | TLS | No |
+| Rate Limiting | Autenticazione | No |
+
+## Milestone
+
+| Milestone | Data Target | Task Inclusi |
+|-----------|-------------|--------------|
+| M1: Security Hardening | 2024-12-31 | Auth MCP, TLS MQTT/HTTP |
+| M2: Production Ready | 2025-03-31 | Persistenza, Multi-Sessione, Monitoring |
+| M3: Scale | 2025-06-30 | Rate Limiting, Plugin System, CLI |

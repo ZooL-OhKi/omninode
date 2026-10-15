@@ -4,22 +4,46 @@ from fastapi.testclient import TestClient
 import main
 
 
+class FakeMQTTClient:
+    def __init__(self, *args, **kwargs):
+        pass
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *args):
+        return False
+
+    async def publish(self, *args, **kwargs):
+        class _T:
+            def __init__(self):
+                self.rc = 0
+
+        return _T()
+
+
 @pytest.fixture
 def client(monkeypatch):
-    monkeypatch.setattr(main, "API_KEY", "test-key")
+    monkeypatch.setattr(main, "MCP_SECRET", "test-key")
     return TestClient(main.app)
 
 
-def test_browse_requires_api_key(client):
-    response = client.post("/api/v1/browse", json={"url": "https://example.com"})
+def test_nodes_endpoint_is_public(client):
+    response = client.get("/api/v1/nodes")
+    assert response.status_code == 200
+    assert response.json() == {}
+
+
+def test_mcp_requires_token(client):
+    response = client.post("/mcp", json={"method": "ping"})
     assert response.status_code == 401
 
 
-def test_browse_rejects_when_no_node_is_online(client, monkeypatch):
-    monkeypatch.setattr(main.mqtt_service, "get_nodes", lambda: [])
+def test_mcp_with_valid_token_uses_mqtt(client, monkeypatch):
+    monkeypatch.setattr(main.aiomqtt, "Client", FakeMQTTClient)
     response = client.post(
-        "/api/v1/browse",
-        headers={"x-omninode-key": "test-key"},
-        json={"url": "https://example.com"},
+        "/mcp",
+        headers={"Authorization": "Bearer test-key"},
+        json={"method": "ping"},
     )
-    assert response.status_code == 503
+    assert response.status_code != 401

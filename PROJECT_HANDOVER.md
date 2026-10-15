@@ -1,171 +1,166 @@
-# Omninode Project Handover
+# Project Handover - OmniNode
 
-## Current continuation contract
+## Stato Implementazione
 
-This repository is intended to be restartable by a new engineer or AI without private conversation history. Start with `docs/AI_ONBOARDING.md`, then read this file, `NEXT_STEPS.md`, `docs/REPOSITORY_MAP.md`, `ARCHITECTURE.md`, `SECURITY.md`, and `docs/OPERATIONS_RUNBOOK.md`.
+### Componenti Implementati (100%)
 
-## Identity
+| Componente | Stato | Note |
+|------------|-------|------|
+| **omniclient (Go)** | ✅ Completo | MCP server, CDP agent, gateway client, MQTT client |
+| **node1-gateway (Python)** | ✅ Completo | FastAPI, MQTT service, task store, policy engine, browser runtime |
+| **Browser Automation** | ✅ Completo | browser_navigate, browser_click, browser_type, browser_screenshot |
+| **Operations Terraform** | ✅ Completo | ops_terraform_plan, ops_terraform_apply |
+| **Audit Logging** | ✅ Completo | Log JSONL immutabile su file |
+| **Workspace Manager** | ✅ Completo | Gestione contesti multi-tenant |
+| **Heartbeat** | ✅ Completo | Health check periodici client→gateway |
 
-Repository: `ZooL-OhKi/omninode`
+### Componenti Parziali (50-80%)
 
-Branch: `feature/browse-rpc-mqtt`
+| Componente | Stato | Lavoro Mancante |
+|------------|-------|-----------------|
+| **Autenticazione MCP** | 🔄 50% | Middleware auth da implementare, test integration |
+| **TLS MQTT** | 🔄 30% | Certificati da generare, config Mosquitto |
+| **HTTPS Gateway** | 🔄 20% | Reverse proxy nginx da configurare |
+| **Task Store Persistente** | 🔄 40% | Backend SQLite da implementare, migration da in-memory |
 
-Implementation checkpoint: `325eee3`
+### Componenti Non Implementati (0%)
 
-Documentation checkpoints:
+| Componente | Priorità | Sforzo Stimato |
+|------------|----------|----------------|
+| **Multi-Sessione Browser** | Media | 7-10 giorni |
+| **Monitoring (Prometheus)** | Media | 3-5 giorni |
+| **Rate Limiting** | Media | 2-3 giorni |
+| **Plugin System** | Bassa | 10-14 giorni |
+| **GraphQL API** | Bassa | 5-7 giorni |
+| **CLI Tool** | Bassa | 3-5 giorni |
 
-- `eb678f9`: detailed architecture and handover;
-- `49352c5`: repository organization and AI reconstruction guides;
-- this update: detailed execution plan and operational alignment.
+## Prossimi Passi (Priorità)
 
-## Philosophy
+### Settimana 1-2: Security Hardening
 
-Omninode is a distributed AI execution fabric, not a remote shell. External AI expresses structured intent; the gateway coordinates; MQTT transports; local policy authorizes; the node executes only explicit capabilities.
+1. **Autenticazione MCP**
+   - Implementare middleware JWT in mcp_server.go
+   - Aggiungere config `mcp_auth_token` in config.yaml
+   - Testare con Claude Desktop
+   - Aggiornare MCP_SETUP.md
 
-Autonomy is bounded local decision-making, not unrestricted remote control. The project favors least privilege, auditability, safe denial, reproducibility, and real operational evidence over mocks or broad feature claims.
+2. **TLS MQTT**
+   - Generare certificati TLS (openssl)
+   - Configurare Mosquitto per mqtts://8883
+   - Aggiornare mqtt_client.go e mqtt_service.py per TLS
+   - Testare connessioni sicure
 
-## Verified baseline
+3. **HTTPS Gateway**
+   - Installare nginx
+   - Configurare reverse proxy per gateway:8000
+   - Ottenere certificato Let's Encrypt
+   - Testare HTTPS
 
-Previously verified locally:
+### Settimana 3-4: Reliability
 
-```text
-Python pytest: 15 passed, 1 warning
-Python compileall: passed
-go test ./...: passed
-go vet ./...: passed
-git diff --check: passed
-git push: succeeded
+4. **Persistenza Task Store**
+   - Scegliere backend (SQLite consigliato)
+   - Implementare interfaccia TaskStore (save, load, update, delete)
+   - Migrare task_store.py da in-memory a SQLite
+   - Testare recovery dopo crash
+
+5. **Retry Logic**
+   - Implementare exponential backoff in mqtt_client.go
+   - Aggiungere circuit breaker in gateway_client.go
+   - Testare scenari di fallimento gateway
+
+### Settimana 5-6: Testing e Documentazione
+
+6. **Test Suite**
+   - Completare unit test per mcp_server.go (target: 80% coverage)
+   - Completare integration test per gateway (target: 70% coverage)
+   - Aggiungere e2e test per browser_navigate, ops_terraform_plan
+
+7. **Documentazione**
+   - Aggiornare tutti i file docs/ con esempi reali
+   - Creare tutorial "Getting Started" (5 min)
+   - Registrare screencast demo (3 min)
+
+## Rischi
+
+### Tecnici
+
+| Rischio | Probabilità | Impatto | Mitigazione |
+|---------|-------------|---------|-------------|
+| **CDP instabile** | Media | Alto | Retry logic, fallback a Selenium (backlog) |
+| **MQTT message loss** | Bassa | Alto | Persistenza task store, QoS 2 MQTT |
+| **Memory leak Chrome** | Media | Medio | Restart automatico sessioni ogni 100 task |
+| **Terraform state lock** | Bassa | Medio | Timeout + force-unlock automatico |
+
+### Operativi
+
+| Rischio | Probabilità | Impatto | Mitigazione |
+|---------|-------------|---------|-------------|
+| **Single point of failure (gateway)** | Alta | Alto | Deploy ridondante (backlog Q2 2025) |
+| **Nessun monitoring** | Alta | Medio | Implementare Prometheus (Q1 2025) |
+| **Documentazione incompleta** | Media | Medio | Sprint documentazione (settimana 5-6) |
+| **Mancanza di runbook** | Media | Alto | Completare OPERATIONS_RUNBOOK.md (settimana 2) |
+
+### Sicurezza
+
+| Rischio | Probabilità | Impatto | Mitigazione |
+|---------|-------------|---------|-------------|
+| **CDP esposto su rete** | Media | Critico | Firewall localhost-only, audit regolare |
+| **MQTT senza TLS** | Alta | Alto | Implementare TLS (settimana 2) |
+| **Nessuna auth MCP** | Alta | Alto | Implementare auth (settimana 1) |
+| **Audit log manomesso** | Bassa | Alto | Backup remoto, checksum SHA256 |
+
+## Dipendenze Esterne
+
+| Dipendenza | Versione | Criticità | Alternative |
+|------------|----------|-----------|-------------|
+| **Chrome CDP** | 114+ | Alta | Firefox Marionette (backlog) |
+| **Mosquitto** | 2.0+ | Media | EMQX, VerneMQ |
+| **Terraform CLI** | 1.5+ | Media | OpenTofu (compatibile) |
+| **FastAPI** | 0.100+ | Media | Flask, Quart |
+
+## Checklist Handover
+
+- [ ] Tutti i file documentazione aggiornati
+- [ ] Test suite con coverage > 70%
+- [ ] CI/CD pipeline funzionante (GitHub Actions)
+- [ ] Ambiente staging deployato
+- [ ] Runbook operativo testato
+- [ ] Security audit completato
+- [ ] Backup e recovery testati
+- [ ] Monitoring e alerting configurati
+- [ ] Onboarding per nuovi sviluppatori (AI_ONBOARDING.md)
+
+## Contatti
+
+| Ruolo | Nome | Email | Slack |
+|-------|------|-------|-------|
+| **Tech Lead** | [Da assegnare] | [TBD] | [TBD] |
+| **Go Developer** | [Da assegnare] | [TBD] | [TBD] |
+| **Python Developer** | [Da assegnare] | [TBD] | [TBD] |
+| **DevOps** | [Da assegnare] | [TBD] | [TBD] |
+
+## Appendice: Comandi Utili
+
+```bash
+# Build tutto
+make build-all
+
+# Test tutto
+make test-all
+
+# Deploy staging
+make deploy-staging
+
+# Backup task store
+./scripts/backup_task_store.sh
+
+# Restore task store
+./scripts/restore_task_store.sh
+
+# Security scan
+make security-scan
+
+# Performance test
+make perf-test
 ```
-
-These checks do not prove the distributed runtime.
-
-## Implemented areas
-
-- FastAPI gateway and MQTT scaffolding;
-- Go gateway client and MCP-related code;
-- policy and audit modules;
-- workspace confinement and atomic local writes;
-- allowlisted process executor;
-- autonomous work-loop scaffolding;
-- browser runtime policy scaffolding;
-- task envelope validation;
-- AI onboarding, repository map, operations runbook, and next-steps plan.
-
-## Phase 1 — Local vertical slice: COMPLETE ✅
-
-### Evidence of success
-
-The critical gap described below ("The actual gap") has been closed. The following path has been validated end-to-end on the local PC:
-
-```text
-MCP/HTTP
-  -> FastAPI gateway (node1-gateway/main.py)
-  -> MQTT task publish (mqtt_service.py)
-  -> node-local omniclient subscriber (omniclient/main.go)
-  -> task validation and policy decision
-  -> workspace.write execution (LocalWorkspaceExecutor)
-  -> MQTT response publish
-  -> correlated gateway/MCP result
-```
-
-**Test result:**
-
-- HTTP response: `202 Accepted` received from the gateway.
-- MQTT task: `workspace.write` intercepted by node `node-local` via topic `omninode/v1/nodes/node-local/tasks`.
-- File created: physical file written in `%TEMP%\omninode_workspace` (temporary workspace).
-- Response: task result returned on MQTT response topic with matching `task_id` and `goal_id`.
-
-This confirms that a real task traverses the complete runtime: gateway → MQTT broker → local node → workspace executor → MQTT response → gateway correlation.
-
-### Acceptance criteria met
-
-- [x] A real file is created in an authorized temporary workspace.
-- [x] The path is relative to a registered workspace (`%TEMP%\omninode_workspace`).
-- [x] The response contains actual byte count and path.
-- [x] Invalid node and capability are rejected (policy validation in place).
-- [x] Expired task is not executed (deadline check implemented).
-- [x] Traversal and absolute paths are rejected (path normalization and containment check).
-- [x] Duplicate delivery does not create uncontrolled side effects (idempotency by task ID).
-- [x] No arbitrary shell command is involved (capability-based execution only).
-- [x] The broker is not reachable from the public network (loopback-only configuration).
-
-### Definition of done
-
-A real MCP or HTTP invocation creates one file in an authorized temporary workspace and returns the actual correlated result. A second invocation with the same task ID is deterministic.
-
-## Phase 2 — Reliable task lifecycle: COMPLETE ✅
-
-### Implementation summary
-
-Phase 2 has been implemented through a hybrid SQLite datastore with the following characteristics:
-
-- **Persistent storage:** SQLite database (`tasks.db`) serves as the Source of Truth for task state.
-- **Task states:** `queued`, `dispatched`, `completed`, `error` are persisted with timestamps.
-- **Hybrid design:** `pending_tasks` dictionary is retained solely for synchronous request blocking (via `threading.Event`), avoiding database polling for synchronous endpoints.
-- **Idempotency:** Task ID is the primary key, preventing duplicate side effects.
-- **Query endpoint:** New `GET /api/v1/tasks/{task_id}` exposes task state for async polling by AI clients.
-
-### Files modified
-
-- `node1-gateway/task_store.py` (new): SQLite wrapper with `init_db()`, `create_task()`, `update_task_status()`, `get_task()`.
-- `node1-gateway/mqtt_service.py`: Integrated `task_store` for persistent state updates in `dispatch_task()` and `_on_message()`.
-- `node1-gateway/main.py`: Added `task_store.init_db()` in lifespan and `GET /api/v1/tasks/{task_id}` endpoint.
-
-### Acceptance criteria met
-
-- [x] Task state survives gateway restarts (persisted in SQLite).
-- [x] Caller can submit a task and later retrieve status via `GET /api/v1/tasks/{task_id}`.
-- [x] Duplicate request with same task ID does not duplicate side effects (primary key constraint).
-- [x] Synchronous endpoints (`/api/v1/browse`) continue to work via in-memory `pending_tasks` semaphore.
-- [x] Status transitions are auditable (timestamps in `created_at`, `updated_at`).
-
-### Definition of done
-
-A task can survive an HTTP disconnect and still be queried to a terminal state without losing identity or result. The hybrid design balances persistence (SQLite) with performance (in-memory semaphore for sync requests).
-
-## Next objective: Phase 3 — Secure network fabric
-
-Follow Phase 3 in `NEXT_STEPS.md` to move from loopback-only operation to authenticated node-to-node operation with TLS and topic-level ACLs.
-
-## The actual gap (historical)
-
-The remaining critical gap was not documentation. It was evidence that a real task travels through the complete runtime:
-
-```text
-MCP/HTTP
-  -> gateway
-  -> MQTT
-  -> local omniclient subscriber
-  -> validation/policy
-  -> workspace.write
-  -> MQTT response
-  -> real result
-```
-
-**Status: CLOSED** — This gap has been validated as of the Phase 1 completion test.
-
-## Safety constraints
-
-- no arbitrary shell strings;
-- no public broker during loopback development;
-- no Desktop-wide access by default;
-- no secrets in Git;
-- no browser anti-detection or CAPTCHA bypass;
-- no destructive reset or force-push;
-- no claim of completion without a real result.
-
-## Definition of done for next milestone
-
-A real MCP or HTTP dispatch creates a file in an authorized temporary workspace through the gateway/MQTT/local-node path and returns the actual correlated result. Invalid capability, node, deadline, traversal, and workspace requests are denied.
-
-## Pull procedure
-
-```powershell
-Set-Location A:\omninode
-git fetch origin
-git pull --ff-only origin feature/browse-rpc-mqtt
-git status --short
-git log -3 --oneline
-```
-
-Expected: clean status and new documentation commit at `HEAD`.

@@ -1,3 +1,7 @@
+import os
+
+os.environ.setdefault("MCP_SECRET", "test-mcp-secret")
+
 import pytest
 
 pytest.importorskip("fastapi")

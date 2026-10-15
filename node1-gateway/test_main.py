@@ -1,3 +1,7 @@
+import os
+
+os.environ.setdefault("MCP_SECRET", "test-mcp-secret")
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -47,3 +51,18 @@ def test_mcp_with_valid_token_uses_mqtt(client, monkeypatch):
         json={"method": "ping"},
     )
     assert response.status_code != 401
+
+
+def test_approve_requires_auth(client):
+    response = client.post("/api/v1/approve", json={"task_id": "t1", "decision": "approve"})
+    assert response.status_code in (401, 403)
+
+
+def test_approve_with_valid_token_uses_mqtt(client, monkeypatch):
+    monkeypatch.setattr(main.aiomqtt, "Client", FakeMQTTClient)
+    response = client.post(
+        "/api/v1/approve",
+        headers={"Authorization": "Bearer test-key"},
+        json={"task_id": "t1", "decision": "approve"},
+    )
+    assert response.status_code == 200

@@ -10,7 +10,7 @@ import aiomqtt
 
 MQTT_BROKER = os.getenv("MQTT_BROKER", "oracle-b.plini.net")
 MQTT_PORT = int(os.getenv("MQTT_PORT", 8883))
-MCP_SECRET = os.getenv("MCP_SECRET", "super-secret-mcp-token")
+MCP_SECRET = os.environ["MCP_SECRET"]
 
 # Stato globale in memoria
 active_nodes = {}      # node_id -> {"last_seen": float, "info": dict}
@@ -125,7 +125,7 @@ def get_nodes():
     return {n_id: d["info"] for n_id, d in active_nodes.items()}
 
 
-@app.post("/api/v1/approve")
+@app.post("/api/v1/approve", dependencies=[Depends(verify_mcp_auth)])
 async def approve_task(payload: dict):
     task_id = payload.get("task_id")
     decision = payload.get("decision")

@@ -80,3 +80,105 @@ func TestGatewayHTTPWithTestServer(t *testing.T) {
 		t.Errorf("Title atteso 'Pagina estratta da Omninode', ricevuto '%s'", res.Title)
 	}
 }
+
+type fakeGateway struct {
+	listResult     map[string]any
+	readResult     map[string]any
+	rollbackResult map[string]any
+	verifyResult   map[string]any
+	autonomyResult map[string]any
+}
+
+func (f *fakeGateway) RestartNode(nodeID string) error { return nil }
+func (f *fakeGateway) Execute(ctx context.Context, language, code string) (*ExecuteResult, error) {
+	return &ExecuteResult{}, nil
+}
+func (f *fakeGateway) Browse(ctx context.Context, url, format string) (*BrowseResult, error) {
+	return &BrowseResult{}, nil
+}
+func (f *fakeGateway) DispatchTask(ctx context.Context, nodeID, taskType string, payload map[string]any) (*DispatchResponse, error) {
+	return &DispatchResponse{TaskID: "task-1"}, nil
+}
+func (f *fakeGateway) GetTaskStatus(ctx context.Context, taskID string) (*TaskStatus, error) {
+	return &TaskStatus{Status: "completed"}, nil
+}
+func (f *fakeGateway) AutonomyRunStep(ctx context.Context, targetFile, content string, contextFiles []string) (map[string]any, error) {
+	return f.autonomyResult, nil
+}
+func (f *fakeGateway) WorkspaceList(ctx context.Context, subpath string) (map[string]any, error) {
+	return f.listResult, nil
+}
+func (f *fakeGateway) WorkspaceRead(ctx context.Context, path string) (map[string]any, error) {
+	return f.readResult, nil
+}
+func (f *fakeGateway) WorkspaceRollback(ctx context.Context, path string) (map[string]any, error) {
+	return f.rollbackResult, nil
+}
+func (f *fakeGateway) CommandVerify(ctx context.Context, preset string) (map[string]any, error) {
+	return f.verifyResult, nil
+}
+func (f *fakeGateway) FabricHealth() (map[string]interface{}, error) {
+	return map[string]interface{}{"health_status": "ok"}, nil
+}
+
+func TestOmninodeCommandVerifyRejectsUnknownPreset(t *testing.T) {
+	server := NewOmninodeServerWithGateway(&fakeGateway{})
+	_, _, err := server.handleOmninodeCommandVerify(
+		context.Background(), nil,
+		OmninodeCommandVerifyInput{Preset: "rm -rf /"},
+	)
+	if err == nil {
+		t.Fatal("atteso errore per preset non consentito")
+	}
+}
+
+func TestOmninodeWorkspaceReadDecodesGatewayResult(t *testing.T) {
+	gateway := &fakeGateway{
+		readResult: map[string]any{
+			"path":       "node1-gateway/ok.py",
+			"content":    "VALUE = 1\n",
+			"sha256":     "abc",
+			"size_bytes": 10,
+		},
+	}
+	server := NewOmninodeServerWithGateway(gateway)
+
+	_, output, err := server.handleOmninodeWorkspaceRead(
+		context.Background(), nil,
+		OmninodeWorkspaceReadInput{Path: "node1-gateway/ok.py"},
+	)
+	if err != nil {
+		t.Fatalf("errore imprevisto: %v", err)
+	}
+	if output.Path != "node1-gateway/ok.py" || output.Content != "VALUE = 1\n" || output.SHA256 != "abc" {
+		t.Fatalf("output inatteso: %+v", output)
+	}
+}
+
+func TestOmninodeAutonomyStepCallsAtomicRunStep(t *testing.T) {
+	gateway := &fakeGateway{
+		autonomyResult: map[string]any{
+			"status":       "committed",
+			"changed_files": []string{"node1-gateway/ok.py"},
+			"rolled_back":  false,
+		},
+	}
+	server := NewOmninodeServerWithGateway(gateway)
+
+	_, output, err := server.handleOmninodeAutonomyStep(
+		context.Background(), nil,
+		OmninodeAutonomyStepInput{
+			TargetFile: "node1-gateway/ok.py",
+			Content:    "VALUE = 2\n",
+		},
+	)
+	if err != nil {
+		t.Fatalf("errore imprevisto: %v", err)
+	}
+	if output.Status != "committed" || output.RolledBack {
+		t.Fatalf("output inatteso: %+v", output)
+	}
+	if len(output.ChangedFiles) != 1 || output.ChangedFiles[0] != "node1-gateway/ok.py" {
+		t.Fatalf("changed_files inattesi: %+v", output.ChangedFiles)
+	}
+}

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"time"
@@ -38,15 +39,19 @@ func NewOmninodeServer() *OmninodeServer {
 	}, nil)
 
 	baseGateway := NewHTTPGateway("http://127.0.0.1:8000")
-	// Configura API key dalle variabili d'ambiente se disponibile
-	// In produzione, usare os.Getenv("OMNINODE_API_KEY")
 	baseGateway.SetAPIKey("")
+	return NewOmninodeServerWithGateway(&gatewayWrapper{HTTPGateway: baseGateway})
+}
 
-	extendedGateway := &gatewayWrapper{HTTPGateway: baseGateway}
+func NewOmninodeServerWithGateway(gateway OmninodeGateway) *OmninodeServer {
+	mcpServer := mcp.NewServer(&mcp.Implementation{
+		Name:    "omninode-client",
+		Version: "v1.0.0",
+	}, nil)
 
 	s := &OmninodeServer{
 		mcpServer: mcpServer,
-		gateway:   extendedGateway,
+		gateway:   gateway,
 	}
 	s.registerTools()
 	return s
@@ -80,6 +85,36 @@ func (s *OmninodeServer) registerTools() {
 		Name:        "workspace.write",
 		Description: "Scrive un file in un workspace autorizzato tramite il gateway Omninode. Supporta polling asincrono per task di lunga durata.",
 	}, s.handleWorkspaceWrite)
+
+	mcp.AddTool(s.mcpServer, &mcp.Tool{
+		Name:        "omninode_workspace_list",
+		Description: "Elenca i file del workspace repository OmniNode.",
+	}, s.handleOmninodeWorkspaceList)
+
+	mcp.AddTool(s.mcpServer, &mcp.Tool{
+		Name:        "omninode_workspace_read",
+		Description: "Legge un file testuale dal workspace repository OmniNode.",
+	}, s.handleOmninodeWorkspaceRead)
+
+	mcp.AddTool(s.mcpServer, &mcp.Tool{
+		Name:        "omninode_workspace_write",
+		Description: "Scrive un file nel repository e verifica automaticamente la modifica con verify_all.",
+	}, s.handleOmninodeWorkspaceWrite)
+
+	mcp.AddTool(s.mcpServer, &mcp.Tool{
+		Name:        "omninode_workspace_rollback",
+		Description: "Ripristina l’ultimo snapshot di un file nel workspace repository.",
+	}, s.handleOmninodeWorkspaceRollback)
+
+	mcp.AddTool(s.mcpServer, &mcp.Tool{
+		Name:        "omninode_command_verify",
+		Description: "Esegue solo un preset statico di verifica OmniNode.",
+	}, s.handleOmninodeCommandVerify)
+
+	mcp.AddTool(s.mcpServer, &mcp.Tool{
+		Name:        "omninode_autonomy_step",
+		Description: "Esegue un passo atomico: write, verify_all e rollback automatico in caso di fallimento.",
+	}, s.handleOmninodeAutonomyStep)
 }
 
 type RestartNodeInput struct {
@@ -169,7 +204,6 @@ type WorkspaceWriteOutput struct {
 	Error        string `json:"error,omitempty"`
 }
 
-// handleWorkspaceWrite gestisce il tool workspace.write con polling asincrono
 func (s *OmninodeServer) handleWorkspaceWrite(ctx context.Context, req *mcp.CallToolRequest, input WorkspaceWriteInput) (*mcp.CallToolResult, WorkspaceWriteOutput, error) {
 	if input.WorkspaceID == "" {
 		return nil, WorkspaceWriteOutput{}, fmt.Errorf("workspace_id è obbligatorio")
@@ -181,51 +215,39 @@ func (s *OmninodeServer) handleWorkspaceWrite(ctx context.Context, req *mcp.Call
 		return nil, WorkspaceWriteOutput{}, fmt.Errorf("content è obbligatorio")
 	}
 
-	// Prepara il payload per il gateway
 	payload := map[string]any{
 		"workspace_id": input.WorkspaceID,
 		"path":         input.Path,
 		"content":      input.Content,
 	}
 
-	// Invia il task al gateway (node-local per il workspace temporaneo locale)
 	dispatchRes, err := s.gateway.DispatchTask(ctx, "node-local", "workspace.write", payload)
 	if err != nil {
 		return nil, WorkspaceWriteOutput{}, fmt.Errorf("dispatch fallito: %w", err)
 	}
 
-	// Il gateway risponde con 202 Accepted e task_id
-	// Eseguiamo polling limitato per attendere il completamento
 	taskID := dispatchRes.TaskID
 	maxAttempts := 30
 	attemptDelay := 500 * time.Millisecond
 
 	for i := 0; i < maxAttempts; i++ {
-		// Verifica se il context è stato cancellato
 		select {
 		case <-ctx.Done():
 			return nil, WorkspaceWriteOutput{}, ctx.Err()
 		default:
 		}
 
-		// Interroga lo stato del task
 		taskStatus, err := s.gateway.GetTaskStatus(ctx, taskID)
 		if err != nil {
-			// Se il task non è ancora nel DB, aspetta e riprova
 			time.Sleep(attemptDelay)
 			continue
 		}
 
-		// Controlla lo stato del task
 		switch taskStatus.Status {
 		case "completed":
-			// Estrai il risultato dal campo result
 			resultData, ok := taskStatus.Result.(map[string]any)
 			if !ok {
-				return nil, WorkspaceWriteOutput{
-					Status: "completed",
-					TaskID: taskID,
-				}, nil
+				return nil, WorkspaceWriteOutput{Status: "completed", TaskID: taskID}, nil
 			}
 
 			bytesWritten := int64(0)
@@ -248,21 +270,209 @@ func (s *OmninodeServer) handleWorkspaceWrite(ctx context.Context, req *mcp.Call
 			}, fmt.Errorf("task fallito: %s", taskStatus.Error)
 
 		case "dispatched", "queued", "running":
-			// Task ancora in esecuzione, aspetta e riprova
 			time.Sleep(attemptDelay)
 			continue
 
 		default:
-			// Stato sconosciuto, aspetta e riprova
 			time.Sleep(attemptDelay)
 			continue
 		}
 	}
 
-	// Timeout: polling esaurito senza risultato
 	return nil, WorkspaceWriteOutput{
 		Status: "timeout",
 		TaskID: taskID,
 		Error:  "polling timeout: task non completato entro il limite",
 	}, fmt.Errorf("polling timeout dopo %d tentativi", maxAttempts)
+}
+
+// --- OmniNode autonomy MCP tools ---
+
+type OmninodeWorkspaceListInput struct {
+	Subpath string `json:"subpath,omitempty" jsonschema:"Sottopercorso relativo opzionale"`
+}
+
+type OmninodeWorkspaceFile struct {
+	Path      string `json:"path"`
+	SizeBytes int64  `json:"size_bytes"`
+	Protected bool   `json:"protected"`
+}
+
+type OmninodeWorkspaceListOutput struct {
+	Files     []OmninodeWorkspaceFile `json:"files"`
+	Truncated bool                    `json:"truncated"`
+}
+
+func decodeGatewayMap[T any](value map[string]any, out *T) error {
+	raw, err := json.Marshal(value)
+	if err != nil {
+		return fmt.Errorf("codifica risposta gateway: %w", err)
+	}
+	if err := json.Unmarshal(raw, out); err != nil {
+		return fmt.Errorf("decodifica risposta gateway: %w", err)
+	}
+	return nil
+}
+
+func (s *OmninodeServer) handleOmninodeWorkspaceList(ctx context.Context, req *mcp.CallToolRequest, input OmninodeWorkspaceListInput) (*mcp.CallToolResult, OmninodeWorkspaceListOutput, error) {
+	result, err := s.gateway.WorkspaceList(ctx, input.Subpath)
+	if err != nil {
+		return nil, OmninodeWorkspaceListOutput{}, err
+	}
+	var output OmninodeWorkspaceListOutput
+	if err := decodeGatewayMap(result, &output); err != nil {
+		return nil, OmninodeWorkspaceListOutput{}, err
+	}
+	return nil, output, nil
+}
+
+type OmninodeWorkspaceReadInput struct {
+	Path string `json:"path" jsonschema:"Percorso relativo del file da leggere"`
+}
+
+type OmninodeWorkspaceReadOutput struct {
+	Path      string `json:"path"`
+	Content   string `json:"content"`
+	SHA256    string `json:"sha256"`
+	SizeBytes int64  `json:"size_bytes"`
+}
+
+func (s *OmninodeServer) handleOmninodeWorkspaceRead(ctx context.Context, req *mcp.CallToolRequest, input OmninodeWorkspaceReadInput) (*mcp.CallToolResult, OmninodeWorkspaceReadOutput, error) {
+	if input.Path == "" {
+		return nil, OmninodeWorkspaceReadOutput{}, fmt.Errorf("path è obbligatorio")
+	}
+	result, err := s.gateway.WorkspaceRead(ctx, input.Path)
+	if err != nil {
+		return nil, OmninodeWorkspaceReadOutput{}, err
+	}
+	var output OmninodeWorkspaceReadOutput
+	if err := decodeGatewayMap(result, &output); err != nil {
+		return nil, OmninodeWorkspaceReadOutput{}, err
+	}
+	return nil, output, nil
+}
+
+type OmninodeWorkspaceWriteInput struct {
+	TargetFile   string   `json:"target_file" jsonschema:"Percorso relativo del file da scrivere"`
+	Content      string   `json:"content" jsonschema:"Contenuto completo del file"`
+	ContextFiles []string `json:"context_files,omitempty" jsonschema:"File di contesto da includere"`
+}
+
+type OmninodeWorkspaceWriteOutput struct {
+	Status       string         `json:"status"`
+	ChangedFiles []string       `json:"changed_files,omitempty"`
+	Verification map[string]any `json:"verification,omitempty"`
+	RolledBack   bool           `json:"rolled_back,omitempty"`
+}
+
+func (s *OmninodeServer) handleOmninodeWorkspaceWrite(ctx context.Context, req *mcp.CallToolRequest, input OmninodeWorkspaceWriteInput) (*mcp.CallToolResult, OmninodeWorkspaceWriteOutput, error) {
+	if input.TargetFile == "" {
+		return nil, OmninodeWorkspaceWriteOutput{}, fmt.Errorf("target_file è obbligatorio")
+	}
+	if input.Content == "" {
+		return nil, OmninodeWorkspaceWriteOutput{}, fmt.Errorf("content è obbligatorio")
+	}
+	result, err := s.gateway.AutonomyRunStep(ctx, input.TargetFile, input.Content, input.ContextFiles)
+	if err != nil {
+		return nil, OmninodeWorkspaceWriteOutput{}, err
+	}
+	var output OmninodeWorkspaceWriteOutput
+	if err := decodeGatewayMap(result, &output); err != nil {
+		return nil, OmninodeWorkspaceWriteOutput{}, err
+	}
+	return nil, output, nil
+}
+
+type OmninodeWorkspaceRollbackInput struct {
+	Path string `json:"path" jsonschema:"Percorso relativo del file da ripristinare"`
+}
+
+type OmninodeWorkspaceRollbackOutput struct {
+	Path   string `json:"path"`
+	Action string `json:"action"`
+}
+
+func (s *OmninodeServer) handleOmninodeWorkspaceRollback(ctx context.Context, req *mcp.CallToolRequest, input OmninodeWorkspaceRollbackInput) (*mcp.CallToolResult, OmninodeWorkspaceRollbackOutput, error) {
+	if input.Path == "" {
+		return nil, OmninodeWorkspaceRollbackOutput{}, fmt.Errorf("path è obbligatorio")
+	}
+	result, err := s.gateway.WorkspaceRollback(ctx, input.Path)
+	if err != nil {
+		return nil, OmninodeWorkspaceRollbackOutput{}, err
+	}
+	var output OmninodeWorkspaceRollbackOutput
+	if err := decodeGatewayMap(result, &output); err != nil {
+		return nil, OmninodeWorkspaceRollbackOutput{}, err
+	}
+	return nil, output, nil
+}
+
+var allowedVerifyPresets = map[string]bool{
+	"python_compile": true,
+	"python_tests":   true,
+	"go_vet":         true,
+	"go_tests":       true,
+	"git_diff_check": true,
+	"verify_all":     true,
+}
+
+type OmninodeCommandVerifyInput struct {
+	Preset string `json:"preset" jsonschema:"Preset statico: python_compile, python_tests, go_vet, go_tests, git_diff_check, verify_all"`
+}
+
+type OmninodeCommandVerifyOutput struct {
+	Preset     string         `json:"preset"`
+	Status     string         `json:"status"`
+	Passed     bool           `json:"passed"`
+	ExitCode   int            `json:"exit_code"`
+	Stdout     string         `json:"stdout,omitempty"`
+	Stderr     string         `json:"stderr,omitempty"`
+	RawResult  map[string]any `json:"-"`
+}
+
+func (s *OmninodeServer) handleOmninodeCommandVerify(ctx context.Context, req *mcp.CallToolRequest, input OmninodeCommandVerifyInput) (*mcp.CallToolResult, OmninodeCommandVerifyOutput, error) {
+	if !allowedVerifyPresets[input.Preset] {
+		return nil, OmninodeCommandVerifyOutput{}, fmt.Errorf("preset non consentito: %s", input.Preset)
+	}
+	result, err := s.gateway.CommandVerify(ctx, input.Preset)
+	if err != nil {
+		return nil, OmninodeCommandVerifyOutput{}, err
+	}
+	var output OmninodeCommandVerifyOutput
+	if err := decodeGatewayMap(result, &output); err != nil {
+		return nil, OmninodeCommandVerifyOutput{}, err
+	}
+	output.RawResult = result
+	return nil, output, nil
+}
+
+type OmninodeAutonomyStepInput struct {
+	TargetFile   string   `json:"target_file" jsonschema:"Percorso relativo del file target"`
+	Content      string   `json:"content" jsonschema:"Contenuto completo del file"`
+	ContextFiles []string `json:"context_files,omitempty" jsonschema:"File di contesto"`
+}
+
+type OmninodeAutonomyStepOutput struct {
+	Status       string         `json:"status"`
+	ChangedFiles []string       `json:"changed_files,omitempty"`
+	Verification map[string]any `json:"verification,omitempty"`
+	RolledBack   bool           `json:"rolled_back,omitempty"`
+}
+
+func (s *OmninodeServer) handleOmninodeAutonomyStep(ctx context.Context, req *mcp.CallToolRequest, input OmninodeAutonomyStepInput) (*mcp.CallToolResult, OmninodeAutonomyStepOutput, error) {
+	if input.TargetFile == "" {
+		return nil, OmninodeAutonomyStepOutput{}, fmt.Errorf("target_file è obbligatorio")
+	}
+	if input.Content == "" {
+		return nil, OmninodeAutonomyStepOutput{}, fmt.Errorf("content è obbligatorio")
+	}
+	result, err := s.gateway.AutonomyRunStep(ctx, input.TargetFile, input.Content, input.ContextFiles)
+	if err != nil {
+		return nil, OmninodeAutonomyStepOutput{}, err
+	}
+	var output OmninodeAutonomyStepOutput
+	if err := decodeGatewayMap(result, &output); err != nil {
+		return nil, OmninodeAutonomyStepOutput{}, err
+	}
+	return nil, output, nil
 }

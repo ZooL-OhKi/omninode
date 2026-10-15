@@ -1,109 +1,179 @@
-# OmniClient
+# omniclient - OmniNode Client (Go)
 
-Desktop application for Omninode fabric, built with Go and Wails.
+## Panoramica
 
-## Prerequisites
+omniclient è il componente client di OmniNode, implementato in Go. Fornisce un server MCP locale che espone tool per automazione browser (`browser_*`) e operazioni infrastrutturali (`ops_*`).
+
+## Architettura
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                         omniclient (Go)                              │
+│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐              │
+│  │  MCP Server  │  │  CDP Agent   │  │  Web Agent   │              │
+│  │  :8080       │  │  :9222       │  │  HTTP        │              │
+│  └──────┬───────┘  └──────┬───────┘  └──────┬───────┘              │
+│         │                 │                  │                       │
+│         └─────────────────┴──────────────────┘                       │
+│                           │                                          │
+│         ┌─────────────────┴──────────────────┐                       │
+│  ┌──────▼───────┐                    ┌───────▼────────┐             │
+│  │  Gateway     │                    │  MQTT          │             │
+│  │  Client      │                    │  Client        │             │
+│  │  (HTTP)      │                    │  (Pub/Sub)     │             │
+│  └──────┬───────┘                    └───────┬────────┘             │
+│         │                                     │                      │
+│         └─────────────────┬───────────────────┘                      │
+│                           │                                          │
+│                  ┌────────▼────────┐                                │
+│                  │  WS Server      │                                │
+│                  │  :8081          │                                │
+│                  └─────────────────┘                                │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+## Setup Worker
+
+### Prerequisiti
 
 - Go 1.21+
-- Node.js 18+
-- Wails CLI (`go install github.com/wailsapp/wails/v2/cmd/wails@latest`)
+- Chrome/Chromium 114+ (con `--remote-debugging-port=9222`)
+- Broker MQTT (Mosquitto, EMQX)
+- node1-gateway raggiungibile
 
-## Development
-
-```bash
-wails dev
-```
-
-## Build
+### Installazione
 
 ```bash
-wails build
+git clone https://github.com/ZooL-OhKi/omninode.git
+cd omninode/omniclient
+go mod download
+go build -ldflags="-s -w" -o omniclient .
 ```
 
-## Architecture
+### Configurazione (config.yaml)
 
-OmniClient connects to the Omninode fabric via MCP (Model Context Protocol) and provides:
-- Local agent orchestration
-- Zero-touch updates via GitHub Actions
-- Distributed computation coordination
-
-## MCP Server
-
-OmniClient includes a built-in MCP server that exposes 4 tools to external AI agents:
-
-| Tool | Description |
-|------|-------------|
-| `list_nodes` | List all connected nodes with status |
-| `get_node_status` | Get detailed status of a specific node |
-| `dispatch_task` | Dispatch computation task to a node |
-| `get_fabric_health` | Get overall fabric health metrics |
-
-### Running MCP Server
-
-**GUI Mode (default):**
-```bash
-wails dev
-# MCP SSE server runs on :8080
+```yaml
+gateway_url: http://localhost:8000
+mqtt_broker: localhost:1883
+mqtt_username: omniclient
+mqtt_password: ${MQTT_PASSWORD}
+cdp_port: 9222
+cdp_timeout_ms: 30000
+mcp_port: 8080
+mcp_host: 127.0.0.1
+log_level: info
+heartbeat_interval_sec: 30
 ```
 
-**Stdio Mode (for agent integration):**
-```bash
-./omniclient --mcp-stdio
-# MCP server runs on stdin/stdout
-```
-
-## Testing MCP
-
-### Python Test Client
+### Avvio
 
 ```bash
-# Install dependencies
-pip install requests
-
-# Run tests (stdio mode)
-python test_mcp_client.py --stdio
-
-# Run tests (SSE mode, requires wails dev running)
-python test_mcp_client.py --sse
+./omniclient
+nohup ./omniclient > /var/log/omni/omniclient.log 2>&1 &
+sudo systemctl start omninode-client
 ```
 
-### AI Agent Integration
+### Verifica
 
-See [MCP_SETUP.md](MCP_SETUP.md) for configuration guides:
-- Gemini Desktop
-- Claude Desktop
-- Cursor IDE
-- Generic MCP clients
-
-### Example: Gemini Desktop
-
-1. Build OmniClient: `wails build`
-2. Add to Gemini MCP config:
-```json
-{
-  "mcpServers": {
-    "omninode": {
-      "command": "/path/to/omniclient",
-      "args": ["--mcp-stdio"]
-    }
-  }
-}
-```
-3. Ask Gemini: "Show me the Omninode fabric health"
-
-## Project Structure
-
-```
-omniclient/
-├── main.go              # Wails app + MCP integration
-├── mcp_server.go        # MCP server implementation
-├── go.mod               # Go module dependencies
-├── wails.json           # Wails configuration
-├── test_mcp_client.py   # Python test client
-├── MCP_SETUP.md         # Agent configuration guide
-└── README.md            # This file
+```bash
+curl http://localhost:8080/health
+curl http://localhost:8080/tools
+tail -f /var/log/omni/omniclient.log
 ```
 
-## License
+## Tool MCP
 
-MIT
+| Tool | Input | Output | Descrizione |
+|------|-------|--------|-------------|
+| `browser_navigate` | `{url: string}` | `{success: bool, title: string}` | Naviga a URL |
+| `browser_click` | `{selector: string}` | `{success: bool}` | Click elemento |
+| `browser_type` | `{selector: string, text: string}` | `{success: bool}` | Digita testo |
+| `browser_screenshot` | `{full_page: bool}` | `{screenshot: base64}` | Screenshot |
+| `ops_terraform_plan` | `{directory: string, vars: object}` | `{output: string}` | Terraform plan |
+| `ops_terraform_apply` | `{directory: string, vars: object}` | `{output: string}` | Terraform apply |
+
+## Sicurezza
+
+### Hardening
+
+```bash
+go build -ldflags="-s -w" -o omniclient .
+useradd -r -s /bin/false omniclient
+chown -R omniclient:omniclient /opt/omniclient
+sudo -u omniclient /opt/omniclient/omniclient
+ufw deny from any to any port 8080
+ufw allow from 127.0.0.1 to any port 8080
+```
+
+### Best Practice
+
+1. Mai esporre CDP su rete pubblica: Solo localhost:9222
+2. Usare auth token MCP: Configurare `mcp_auth_token` in produzione
+3. Limitare permessi utente: omniclient non deve avere accesso root
+4. Audit logging: Abilitare log per tutte le operazioni
+5. TLS per MQTT: Usare mqtts:// con certificati client
+
+## Troubleshooting
+
+### MCP server non risponde
+
+```bash
+ps aux | grep omniclient
+netstat -tlnp | grep 8080
+tail -100 /var/log/omni/omniclient.log | grep ERROR
+systemctl restart omninode-client
+```
+
+### CDP non connesso
+
+```bash
+curl http://localhost:9222/json/version
+pkill chrome
+google-chrome --remote-debugging-port=9222 --user-data-dir=/opt/chrome-profiles/omni &
+curl http://localhost:9222/json/version
+```
+
+### MQTT disconnesso
+
+```bash
+systemctl status mosquitto
+mosquitto_sub -u omniclient -P ${MQTT_PASSWORD} -t "omni/#" -v
+journalctl -u mosquitto | tail -50
+```
+
+### Gateway irraggiungibile
+
+```bash
+curl http://gateway:8000/health
+ping gateway
+grep "gateway" /var/log/omni/omniclient.log | grep ERROR
+```
+
+## Test
+
+```bash
+go test -v ./...
+go test -coverprofile=coverage.out ./...
+go tool cover -html=coverage.out
+go test -race ./...
+go test -bench=. -benchmem ./...
+```
+
+## Dipendenze
+
+| Pacchetto | Versione | Scopo |
+|-----------|----------|-------|
+| mcp-go | v0.1.0 | MCP server |
+| gorilla/websocket | v1.5.0 | WebSocket |
+| paho.mqtt.golang | v1.4.0 | MQTT client |
+| chromedp | v0.9.0 | CDP client |
+| zap | v1.25.0 | Logging |
+| yaml.v3 | v3.0.1 | Config YAML |
+
+## Risorse
+
+- [ARCHITECTURE.md](../ARCHITECTURE.md) - Architettura dettagliata
+- [MCP_SETUP.md](MCP_SETUP.md) - Config MCP per Claude Desktop
+- [HANDOFF.md](HANDOFF.md) - Stato componenti
+- [MCP Specification](https://modelcontextprotocol.io/)
+- [Chromedp Documentation](https://pkg.go.dev/github.com/chromedp/chromedp)

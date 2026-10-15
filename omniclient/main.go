@@ -1,72 +1,61 @@
 package main
 
 import (
-    "context"
-    "embed"
-    "fmt"
-    "log"
-    "os"
-
-    "github.com/wailsapp/wails/v2"
-    "github.com/wailsapp/wails/v2/pkg/options"
-    "github.com/wailsapp/wails/v2/pkg/options/assetserver"
+	"log/slog"
+	"os"
+	"os/signal"
+	"syscall"
 )
 
-//go:embed all:frontend/dist
-var assets embed.FS
-
-type App struct {
-    mcpServer *OmninodeServer
-}
-
-func NewApp() *App {
-    return &App{mcpServer: NewOmninodeServer()}
-}
-
-func (a *App) Greeting(name string) string {
-    return fmt.Sprintf("Hello %s, welcome to Omninode!", name)
-}
-
-func (a *App) GetFabricHealth() map[string]interface{} {
-    if a.mcpServer.gateway != nil {
-        health, err := a.mcpServer.gateway.FabricHealth()
-        if err == nil {
-            return health
-        }
-        return map[string]interface{}{"health_status": "unavailable", "error": err.Error()}
-    }
-    return map[string]interface{}{"health_status": "local-fallback", "total_nodes": 0, "online_nodes": 0}
-}
-
-func (a *App) startup(ctx context.Context) {
-    if a.mcpServer.gateway == nil {
-        log.Println("Node1 Gateway not configured; MCP uses local fallback mode")
-        return
-    }
-    log.Println("Omninode Client connected to configured Node1 Gateway")
-}
-
 func main() {
-    if len(os.Args) > 1 && os.Args[1] == "--mcp-stdio" {
-        if err := NewOmninodeServer().StartMCPStdio(); err != nil {
-            log.Fatalf("MCP stdio error: %v", err)
-        }
-        return
-    }
+	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
+	slog.SetDefault(logger)
 
-    app := NewApp()
-    err := wails.Run(&options.App{
-        Title:  "Omninode Client",
-        Width:  1024,
-        Height: 768,
-        AssetServer: &assetserver.Options{
-            Assets: assets,
-        },
-        BackgroundColour: &options.RGBA{R: 27, G: 38, B: 54, A: 1},
-        OnStartup:        app.startup,
-        Bind:             []interface{}{app},
-    })
-    if err != nil {
-        log.Fatal(err)
-    }
+	slog.Info("Avvio Omninode Worker...")
+
+	// Inizializza database SQLite per HITL
+	if err := InitDB("file:omninode.db?mode=rwc"); err != nil {
+		slog.Error("Impossibile inizializzare database", "err", err)
+		os.Exit(1)
+	}
+
+	// Inizializza browser CDP
+	if err := InitWebAgent(); err != nil {
+		slog.Error("Impossibile avviare WebAgent", "err", err)
+		os.Exit(1)
+	}
+
+	// Avvia WebSocket locale (opzionale, per debug)
+	go StartWSServer(8080)
+
+	// Configura parametri MQTT da variabili d'ambiente
+	nodeID := getEnv("OMNI_NODE_ID", "ryzen")
+	brokerURL := getEnv("OMNI_MQTT_BROKER", "tls://oracle-b.plini.net:8883")
+	caPath := getEnv("OMNI_MQTT_CA", "certs/ca.crt")
+	certPath := getEnv("OMNI_MQTT_CERT", "certs/client.crt")
+	keyPath := getEnv("OMNI_MQTT_KEY", "certs/client.key")
+
+	// Avvia worker MQTT
+	worker, err := StartMQTTWorker(brokerURL, nodeID, caPath, certPath, keyPath)
+	if err != nil {
+		slog.Error("Errore connessione MQTT", "err", err)
+		os.Exit(1)
+	}
+	defer worker.Client.Disconnect(250)
+
+	// Avvia heartbeat loop
+	go startHeartbeatLoop(worker.Client, nodeID, []string{"agent_1", "devops_bot"})
+
+	// Attendi segnale di terminazione
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+	<-sigChan
+	slog.Info("Spegnimento Omninode Worker...")
+}
+
+func getEnv(key, fallback string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return fallback
 }

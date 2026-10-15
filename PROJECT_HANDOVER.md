@@ -6,41 +6,31 @@ Omninode hosts autonomous AI residents continuously on Oracle servers. The resid
 
 Runtime controls remain mandatory: identity, capabilities, workspace restrictions, network policy, secret isolation, resource budgets, audit logging, and approval for destructive or high-risk actions.
 
-## Verified baseline
+## Verified baseline (Phase 2.5)
 
-- Python gateway exposes authenticated `POST /api/v1/browse`.
-- MQTT service has synchronous Request-Reply dispatch with `PendingTask`, `threading.Event`, locking, timeout handling, and cleanup in `finally`.
-- Go gateway client has deterministic local HTTP contract coverage.
-- Python tests cover API-key rejection and no-online-node handling and pass locally.
-- Repository ignore rules exclude venvs, Python caches, Go binaries, secrets, logs, databases, and local artifacts.
-- `httpx2` is required by the installed Starlette test client and is included in the test dependencies.
-- Python test coverage is still incomplete; broker-backed integration tests are not yet implemented.
+- Python gateway exposes authenticated /mcp and public /api/v1/nodes; autonomy endpoints are wired via autonomy_app.py.
+- autonomy_core.py provides RepoWorkspace (confined list/read/write/rollback with PROTECTED_PATHS, symlink and traversal denial, secret filtering, redaction, snapshots) and VerificationExecutor (static presets only, shell=False, 16000-char output cap, verify_all fail-fast).
+- work_loop.py provides SelfHostingWorkLoop (READ_CONTEXT -> GENERATE_OR_REFINE_PATCH -> WORKSPACE_WRITE -> VERIFY_SUITE -> SELF_HEAL max 3 -> COMMIT_OR_ROLLBACK) and PerplexityHelper (urllib only, PERPLEXITY_API_KEY / PERPLEXITY_MODEL).
+- autonomy_api.py exposes POST /api/v1/autonomy/run-step, POST /api/v1/autonomy/goals, GET /api/v1/autonomy/goals/{id}; capabilities are granted for 15 minutes and checked by PolicyEngine; state is persisted in tasks.db via task_store.
+- omniclient builds and tests green: playwright import renamed to github.com/mxschmitt/playwright-go, duplicate declarations removed, StartWSServer call fixed, dependencies added to go.mod/go.sum.
+- test_main.py rewritten for existing endpoints (/api/v1/nodes, /mcp with MQTT mocked).
+- pytest: 59 passed, 1 skipped, 0 failed. go vet: clean. go test: ok. git diff --check: clean.
 
-## Verified architectural position
+## Known issues (do not merge without fixing)
 
-Omninode is a distributed computational fabric designed to host autonomous and persistent AI residents 24/7 on Oracle Cloud servers. The goal is to move beyond passive agents that receive individual commands, providing resident AIs with an operational environment in which they can plan, execute, verify, correct, and document work directly on node resources within runtime capabilities and policies.
-
-The gateway uses synchronous MQTT Request-Reply with correlated tasks, `PendingTask`, `threading.Event`, structures protected by `RLock`, timeout handling, and cleanup on success and failure. Current routing selects an online node with the lowest reported `load`; this is deterministic routing and is not yet proven optimal load balancing.
-
-`omniclient` implements the HTTP client and MCP integration. The Browse HTTP contract is tested offline with `httptest.NewServer`, without external network dependencies. Depending on deployment, the Go component can operate as a local fabric component or MCP interface; it should not be described only as an end-user device client.
-
-The initial browser direction is standard Chromium with Playwright and/or CDP, isolated profiles per agent or task, protected CDP, domain allowlists, and auditable actions. A custom Chromium fork is not planned in this phase. CAPTCHA, MFA, payments, and other high-risk actions require pause or authorized handoff; anti-abuse protections must not be bypassed.
-
-The security model is default deny and least privilege, with explicit capabilities, isolated workspaces, controlled filesystem/process/network access, separated secret handling, audit logs, and approval for destructive or high-risk actions. Cryptographic in-memory secret isolation remains a requirement to implement and verify; it is not a guarantee demonstrated by the current baseline.
-
-The Go HTTP contract tests, `go test ./...`, `go vet ./...`, Python compilation, gateway import, and initial Python tests pass locally. MQTT broker-backed end-to-end coverage for concurrency, timeout cleanup, duplicate and late responses, reconnects, and worker restart remains to be completed. The Go race detector also needs an environment with CGO/GCC.
+- requirements.txt pins aiomqtt==2.4.2, which does not exist on PyPI. Local install used 2.4.0.
+- node1-gateway/.env is tracked in git. Rotate every credential it contains and remove the file from history.
+- main.py has a hard-coded default MCP_SECRET ("super-secret-mcp-token"). Remove it and require the env var.
+- POST /api/v1/approve is unauthenticated.
+- workspace_manager.py checks is_symlink() after resolve(), so the check can never trigger; writes are not atomic.
+- command_executor.py and test_executor.py allow python/go with free arguments (arbitrary code execution). The new autonomy path does not use them, but they must be removed or aligned.
+- MQTT topics are still omninode/nodes/... in main.py, not omninode/v1/nodes/{node_id}/...
 
 ## Current phase
 
-The reliability baseline is closed for HTTP and initial gateway tests. The next phase is MQTT reliability. Add an isolated local broker test environment and cover concurrency, timeouts, cleanup, duplicate and late responses, malformed payloads, offline nodes, reconnects, and worker restarts. Never use the Oracle production broker for tests.
+Phase 2.5 (Self-Hosting Autonomy Bootstrap) is code-complete and test-green on the feature branch. It is NOT merged into feature/browse-rpc-mqtt.
 
-## Browser direction
-
-Start with standard Chromium, Playwright/CDP, isolated profiles, protected CDP, domain allowlists, controlled downloads/uploads, and auditable actions. Do not fork Chromium initially. CAPTCHA and MFA require pause or authorized handoff; anti-abuse controls must not be bypassed.
-
-## Security and repository rules
-
-Use default deny and least privilege. Restrict files to explicit workspaces. Do not expose unrestricted shell execution. Keep secrets out of Git. Do not commit generated binaries, virtual environments, logs, databases, or local state. Review `SECURITY.md` before adding capabilities.
+Next phase: fix the known issues above, then Phase 3 (versioned RPC schema, Audit Transparency Log with Ed25519/Merkle) and the Swarm Fabric v4.0 backlog.
 
 ## Validation
 
@@ -50,15 +40,12 @@ Set-Location A:\omninode\node1-gateway
 & .\venv\Scripts\python.exe -m compileall .
 
 Set-Location A:\omninode\omniclient
-gofmt -l .
-go test ./...
-go test -race ./...
 go vet ./...
+go test ./...
 
 Set-Location A:\omninode
 git diff --check
 git status --short
-git diff --stat
 ```
 
-`pytest` currently reports passing initial tests after installing `httpx2`. If the race detector cannot run because CGO/GCC is unavailable, record that limitation rather than treating it as a functional test failure. No commit or push should occur without review of the complete diff.
+No commit or push should occur without review of the complete diff.

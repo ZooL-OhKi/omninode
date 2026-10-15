@@ -33,3 +33,66 @@ func TestWorkspaceHandlerRejectsUnknownTask(t *testing.T) {
 		t.Fatal("expected unsupported task rejection")
 	}
 }
+
+func TestWorkspaceHandlerIgnoresDuplicateTask(t *testing.T) {
+	root := t.TempDir()
+	handler := NewWorkspaceHandler(root)
+	envelope := TaskEnvelope{
+		TaskID: "duplicate-1",
+		TaskType: "workspace.write",
+		Payload: json.RawMessage(`{"path":"duplicate.txt","content":"first"}`),
+	}
+
+	if _, err := handler.Execute(envelope); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "duplicate.txt"), []byte("changed"), 0o640); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := handler.Execute(envelope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decoded map[string]string
+	if err := json.Unmarshal(result, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	if decoded["status"] != "duplicate_ignored" {
+		t.Fatalf("expected duplicate_ignored, got: %s", result)
+	}
+
+	data, err := os.ReadFile(filepath.Join(root, "duplicate.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != "changed" {
+		t.Fatalf("duplicate task was executed again: %q", data)
+	}
+}
+
+func TestWorkspaceHandlerPersistsProcessedTasks(t *testing.T) {
+	root := t.TempDir()
+	handler := NewWorkspaceHandler(root)
+	envelope := TaskEnvelope{
+		TaskID: "persistent-1",
+		TaskType: "workspace.write",
+		Payload: json.RawMessage(`{"path":"persistent.txt","content":"first"}`),
+	}
+	if _, err := handler.Execute(envelope); err != nil {
+		t.Fatal(err)
+	}
+
+	reloaded := NewWorkspaceHandler(root)
+	result, err := reloaded.Execute(envelope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decoded map[string]string
+	if err := json.Unmarshal(result, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	if decoded["status"] != "duplicate_ignored" {
+		t.Fatalf("expected persisted duplicate handling, got: %s", result)
+	}
+}

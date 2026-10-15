@@ -26,6 +26,10 @@ class FakeMQTTClient:
         return _T()
 
 
+class FakeTLSParameters:
+    pass
+
+
 @pytest.fixture
 def client(monkeypatch):
     monkeypatch.setattr(main, "MCP_SECRET", "test-key")
@@ -60,6 +64,7 @@ def test_approve_requires_auth(client):
 
 def test_approve_with_valid_token_uses_mqtt(client, monkeypatch):
     monkeypatch.setattr(main.aiomqtt, "Client", FakeMQTTClient)
+    monkeypatch.setattr(main, "mqtt_tls_params", lambda: FakeTLSParameters())
     monkeypatch.setitem(main.agent_routing, "agent_1", "worker-1")
     response = client.post(
         "/api/v1/approve",

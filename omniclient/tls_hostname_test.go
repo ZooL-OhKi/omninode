@@ -14,6 +14,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -172,9 +173,13 @@ func TestBuildTLSConfigRejectsHostnameMismatch(t *testing.T) {
 	if handshakeErr == nil {
 		t.Fatal("expected hostname mismatch rejection")
 	}
-	var hostnameError *x509.HostnameError
-	if !errors.As(handshakeErr, &hostnameError) {
-		t.Fatalf("expected x509 hostname error, got: %v", handshakeErr)
+
+	var certificateError *tls.CertificateVerificationError
+	if !errors.As(handshakeErr, &certificateError) {
+		t.Fatalf("expected TLS certificate verification error, got: %v", handshakeErr)
+	}
+	if !strings.Contains(certificateError.Error(), "not wrong.host.example") {
+		t.Fatalf("unexpected certificate verification error: %v", certificateError)
 	}
 }
 

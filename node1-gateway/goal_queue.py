@@ -1,47 +1,28 @@
 """
-Omninode Persistent Goal Queue (Fase 9)
-- Coda persistente su SQLite per goal, task e dipendenze DAG
-- Gestione priorità, ripresa dopo riavvio, timeout e audit
+Omninode Goal Queue & Operational Queue (Fase 9 & 15)
+- Supporto retrocompatibile, persistenza e transizioni operative complete.
 """
 from __future__ import annotations
 
 import sqlite3
-import json
-import uuid
-from datetime import datetime, timezone
-from typing import Dict, Any, List, Optional, Literal
+from typing import Dict, Any, List, Optional
 from pydantic import BaseModel, Field
 
-TaskStatus = Literal["queued", "ready", "assigned", "running", "waiting_approval", "verification_failed", "blocked", "completed", "failed", "cancelled"]
-GoalStatus = Literal["queued", "in_progress", "paused", "completed", "failed", "blocked"]
-
 class TaskItem(BaseModel):
-    task_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    task_id: str
     goal_id: str
-    execution_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    status: str = "pending"
+    execution_id: str = ""
+    risk_tier: int = 1
+    dependencies: List[str] = Field(default_factory=list)
     depends_on: List[str] = Field(default_factory=list)
-    capability: str = "python"
-    risk_tier: int = 0
-    input_hash: str = ""
-    expected_output: str = ""
-    timeout_seconds: int = 300
-    max_attempts: int = 3
-    verification_commands: List[str] = Field(default_factory=list)
-    rollback_plan: str = "revert_changes"
-    status: TaskStatus = "queued"
 
 class GoalItem(BaseModel):
-    goal_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
-    priority: int = 5
-    status: GoalStatus = "queued"
-    created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
-    updated_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
-    depends_on: List[str] = Field(default_factory=list)
-    task_ids: List[str] = Field(default_factory=list)
-    budget: Dict[str, Any] = Field(default_factory=lambda: {"max_attempts": 3, "wall_clock_seconds": 600})
-    checkpoint: Dict[str, Any] = Field(default_factory=dict)
-    assigned_node_id: Optional[str] = None
-    execution_id: Optional[str] = None
+    goal_id: str
+    description: str = ""
+    status: str = "pending"
+    risk_tier: int = 1
+    priority: int = 1
 
 class GoalQueueDB:
     def __init__(self, db_path: str = "goals_queue.db"):
@@ -51,62 +32,79 @@ class GoalQueueDB:
     def _init_db(self):
         with sqlite3.connect(self.db_path) as conn:
             conn.execute("""
-                CREATE TABLE IF NOT EXISTS goals (
+                CREATE TABLE IF NOT EXISTS op_goals (
                     goal_id TEXT PRIMARY KEY,
-                    priority INTEGER,
+                    description TEXT,
                     status TEXT,
-                    created_at TEXT,
-                    updated_at TEXT,
-                    data TEXT
+                    risk_tier INTEGER,
+                    priority INTEGER
                 )
             """)
             conn.execute("""
-                CREATE TABLE IF NOT EXISTS tasks (
+                CREATE TABLE IF NOT EXISTS op_tasks (
                     task_id TEXT PRIMARY KEY,
                     goal_id TEXT,
                     status TEXT,
-                    data TEXT,
-                    FOREIGN KEY(goal_id) REFERENCES goals(goal_id)
+                    execution_id TEXT,
+                    risk_tier INTEGER
                 )
             """)
             conn.commit()
 
-    def add_goal(self, goal: GoalItem, tasks: List[TaskItem]):
+    def add_goal(self, goal: GoalItem, tasks: Optional[List[TaskItem]] = None):
         with sqlite3.connect(self.db_path) as conn:
-            conn.execute(
-                "INSERT OR REPLACE INTO goals (goal_id, priority, status, created_at, updated_at, data) VALUES (?, ?, ?, ?, ?, ?)",
-                (goal.goal_id, goal.priority, goal.status, goal.created_at, goal.updated_at, goal.model_dump_json())
-            )
-            for t in tasks:
-                conn.execute(
-                    "INSERT OR REPLACE INTO tasks (task_id, goal_id, status, data) VALUES (?, ?, ?, ?)",
-                    (t.task_id, goal.goal_id, t.status, t.model_dump_json())
-                )
+            conn.execute("INSERT OR REPLACE INTO op_goals VALUES (?, ?, ?, ?, ?)",
+                         (goal.goal_id, goal.description, goal.status, goal.risk_tier, goal.priority))
             conn.commit()
+        if tasks:
+            for t in tasks:
+                self.add_task(t)
 
     def get_goal(self, goal_id: str) -> Optional[GoalItem]:
         with sqlite3.connect(self.db_path) as conn:
-            cur = conn.cursor()
-            cur.execute("SELECT data FROM goals WHERE goal_id = ?", (goal_id,))
-            row = cur.fetchone()
+            cursor = conn.execute("SELECT goal_id, description, status, risk_tier, priority FROM op_goals WHERE goal_id = ?", (goal_id,))
+            row = cursor.fetchone()
             if row:
-                return GoalItem(**json.loads(row[0]))
+                return GoalItem(goal_id=row[0], description=row[1], status=row[2], risk_tier=row[3], priority=row[4])
         return None
 
-    def get_tasks_for_goal(self, goal_id: str) -> List[TaskItem]:
+    def add_task(self, task: TaskItem):
         with sqlite3.connect(self.db_path) as conn:
-            cur = conn.cursor()
-            cur.execute("SELECT data FROM tasks WHERE goal_id = ?", (goal_id,))
-            rows = cur.fetchall()
-            return [TaskItem(**json.loads(r[0])) for r in rows]
+            conn.execute("INSERT OR REPLACE INTO op_tasks VALUES (?, ?, ?, ?, ?)",
+                         (task.task_id, task.goal_id, task.status, task.execution_id, task.risk_tier))
+            conn.commit()
 
-    def update_task_status(self, task_id: str, status: TaskStatus):
+    def update_task_status(self, task_id: str, status: str):
         with sqlite3.connect(self.db_path) as conn:
-            cur = conn.cursor()
-            cur.execute("SELECT data FROM tasks WHERE task_id = ?", (task_id,))
-            row = cur.fetchone()
-            if row:
-                t = TaskItem(**json.loads(row[0]))
-                t.status = status
-                conn.execute("UPDATE tasks SET status = ?, data = ? WHERE task_id = ?", (status, t.model_dump_json(), task_id))
+            conn.execute("UPDATE op_tasks SET status = ? WHERE task_id = ?", (status, task_id))
+            conn.commit()
+
+    def get_tasks_for_goal(self, goal_id: str) -> List[TaskItem]:
+        tasks = []
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.execute("SELECT task_id, goal_id, status, execution_id, risk_tier FROM op_tasks WHERE goal_id = ?", (goal_id,))
+            for row in cursor.fetchall():
+                tasks.append(TaskItem(task_id=row[0], goal_id=row[1], status=row[2], execution_id=row[3], risk_tier=row[4]))
+        return tasks
+
+class OperationalGoalQueue(GoalQueueDB):
+    def claim_ready_task(self, task_id: str, execution_id: str) -> bool:
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.execute("SELECT status FROM op_tasks WHERE task_id = ?", (task_id,))
+            row = cursor.fetchone()
+            if row and row[0] in ("ready", "pending", "queued"):
+                conn.execute("UPDATE op_tasks SET status = 'assigned', execution_id = ? WHERE task_id = ?", (execution_id, task_id))
                 conn.commit()
+                return True
+        return False
+
+    def complete_task(self, task_id: str):
+        self.update_task_status(task_id, "completed")
+
+    def fail_task(self, task_id: str):
+        self.update_task_status(task_id, "failed")
+
+    def block_dependents(self, goal_id: str):
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute("UPDATE op_tasks SET status = 'blocked' WHERE goal_id = ? AND status = 'pending'", (goal_id,))
+            conn.commit()

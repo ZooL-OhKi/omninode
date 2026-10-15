@@ -3,8 +3,10 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"html"
 	"math"
 	"math/rand"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -477,4 +479,64 @@ func TrustedClick(sess *WebSession, refID int) (string, error) {
 	sess.mu.Unlock()
 
 	return fmt.Sprintf("click ok su ref %d (snapshot %d) in (%.0f,%.0f)%s", refID, gen, px, py, warn), nil
+}
+
+// ---------------------------------------------------------------------------
+// Browser DOM stream completion and code extraction
+// ---------------------------------------------------------------------------
+
+const waitForDOMStreamCompleteAndExtractCode = `async function WaitForDOMStreamCompleteAndExtractCode(timeoutMs = 30000, stableMs = 1800) {
+  let lastMutation = Date.now();
+  const observer = new MutationObserver(() => {
+    lastMutation = Date.now();
+  });
+
+  observer.observe(document.documentElement, {
+    childList: true,
+    subtree: true,
+    characterData: true,
+  });
+
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < timeoutMs) {
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    if (Date.now() - lastMutation >= stableMs) {
+      break;
+    }
+  }
+
+  observer.disconnect();
+  const codeBlocks = Array.from(document.querySelectorAll('pre code'));
+  return codeBlocks.length ? codeBlocks[codeBlocks.length - 1].textContent : '';
+}`
+
+var (
+	domCodeBlockPattern = regexp.MustCompile(`(?is)<pre[^>]*>\s*<code[^>]*>(.*?)</code>\s*</pre>`)
+	jwtPattern          = regexp.MustCompile(`\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b`)
+	awsAccessKeyPattern = regexp.MustCompile(`\bAKIA[0-9A-Z]{16}\b`)
+	privateKeyPattern   = regexp.MustCompile(`(?s)-----BEGIN [A-Z ]*PRIVATE KEY-----.*?-----END [A-Z ]*PRIVATE KEY-----`)
+)
+
+// sanitizeExtractedCode redige segreti comuni prima che il contenuto lasci il browser.
+func sanitizeExtractedCode(code string) string {
+	code = jwtPattern.ReplaceAllString(code, "[REDACTED_JWT]")
+	code = awsAccessKeyPattern.ReplaceAllString(code, "[REDACTED_AWS_ACCESS_KEY]")
+	code = privateKeyPattern.ReplaceAllString(code, "[REDACTED_PRIVATE_KEY]")
+	return code
+}
+
+// ExtractLastCodeBlockFromDOM estrae, decodifica e sanitizza l’ultimo blocco
+// <pre><code> presente nel DOM della Web UI AI.
+func ExtractLastCodeBlockFromDOM(dom string) (string, error) {
+	matches := domCodeBlockPattern.FindAllStringSubmatch(dom, -1)
+	if len(matches) == 0 {
+		return "", fmt.Errorf("nessun blocco <pre><code> trovato nel DOM")
+	}
+
+	code := html.UnescapeString(matches[len(matches)-1][1])
+	code = strings.TrimSpace(code)
+	if code == "" {
+		return "", fmt.Errorf("l’ultimo blocco <pre><code> è vuoto")
+	}
+	return sanitizeExtractedCode(code), nil
 }

@@ -33,11 +33,6 @@ type OmninodeServer struct {
 }
 
 func NewOmninodeServer() *OmninodeServer {
-	mcpServer := mcp.NewServer(&mcp.Implementation{
-		Name:    "omninode-client",
-		Version: "v1.0.0",
-	}, nil)
-
 	baseGateway := NewHTTPGateway("http://127.0.0.1:8000")
 	baseGateway.SetAPIKey("")
 	return NewOmninodeServerWithGateway(&gatewayWrapper{HTTPGateway: baseGateway})

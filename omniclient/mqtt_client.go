@@ -135,6 +135,32 @@ func handleTask(client mqtt.Client, nodeID string, payload []byte, handler *Work
 	}
 }
 
+func publishRes(client mqtt.Client, nodeID, taskID, status, result string) error {
+	resultPayload := json.RawMessage(result)
+	if !json.Valid(resultPayload) {
+		encodedResult, err := json.Marshal(result)
+		if err != nil {
+			return err
+		}
+		resultPayload = encodedResult
+	}
+
+	payload, err := json.Marshal(TaskResponse{
+		TaskID: taskID,
+		Status: status,
+		Result: resultPayload,
+	})
+	if err != nil {
+		return err
+	}
+
+	token := client.Publish(responseTopic(nodeID), 1, false, payload)
+	if !token.Wait() || token.Error() != nil {
+		return token.Error()
+	}
+	return nil
+}
+
 func StartMQTTWorker(config WorkerConfig) (mqtt.Client, error) {
 	client, err := NewMQTTClient(config)
 	if err != nil {

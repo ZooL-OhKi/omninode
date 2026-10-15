@@ -27,6 +27,27 @@ OmniNode è un sistema distribuito con:
 - Build Linux amd64: riuscita, binario `omniclient` 18 MB.
 - Test hostname mismatch: presente e PASS (`omniclient/tls_hostname_test.go`).
 
+## Stato live worker-2 — 2026-10-15
+
+Il nodo `worker-2` è stato configurato e collegato all’orchestratore:
+
+- Servizio `omninode-worker.service`: `active / running`, `enabled`, `NRestarts=0`.
+- Certificato client: CN/SAN `worker-2`, firma CA verificata.
+- MQTT: mTLS, TLS 1.3, hostname verification attiva, `InsecureSkipVerify=false`.
+- Broker: Mosquitto con ACL identity-based.
+- Topic: `omninode/v1/nodes/worker-2/#`.
+- Gateway: `worker-2` risulta `online` in `/api/v1/nodes`.
+- Agente dichiarato: `archivista`.
+
+La registrazione nel gateway è verificata. Non è ancora verificata l’esecuzione end-to-end di un task applicativo.
+
+Gli heartbeat di `worker-1` e `worker-2` usano formati parzialmente diversi:
+
+- `worker-1`: timestamp numerico e `agent_id`.
+- `worker-2`: timestamp testuale UTC e `supported_agents`.
+
+Il gateway registra entrambi, ma la compatibilità di tutti i consumatori va verificata prima di considerare il contratto heartbeat stabile.
+
 ## Invarianti di sicurezza — NON VIOLARE
 
 1. mTLS è obbligatorio per MQTT.
@@ -54,6 +75,7 @@ OmniNode è un sistema distribuito con:
 - `deploy/mosquitto/`: configurazione broker e ACL.
 - `deploy/systemd/`: unit systemd.
 - `scripts/oracle_bootstrap.py`: bootstrap idempotente.
+- `docs/WORKER2_HANDOVER.md`: handover live di `worker-2`.
 
 ## Comandi di sviluppo
 
@@ -123,6 +145,8 @@ Prerequisiti fuori da Git:
 - `/etc/omninode/certs/gateway.key`
 - `/etc/omninode/certs/worker-1.crt`
 - `/etc/omninode/certs/worker-1.key`
+- `/etc/omninode/certs/worker-2.crt`
+- `/etc/omninode/certs/worker-2.key`
 - `/etc/omninode/omninode-gateway.env`
 - `/etc/omninode/omninode-worker.env`
 
@@ -132,16 +156,18 @@ Prerequisiti fuori da Git:
 
 ## Prossimi lavori consigliati
 
-1. CI GitHub Actions per `pytest`, `go vet`, `go test` e build Linux amd64.
-2. Scansione segreti automatica sulla PR.
-3. Test di integrazione mTLS end-to-end con broker effimero.
-4. Persistenza idempotenza worker con write atomico o registro append-only.
-5. Metriche Prometheus per gateway, worker e broker.
-6. Rotazione e revoca certificati.
-7. Hardening systemd: `ProtectSystem`, `ProtectHome`, `NoNewPrivileges`, `PrivateTmp`, dove compatibili.
-8. Decisione esplicita e documentata su esposizione della porta WSS 8443.
-9. Runbook operativo per incident response e rotazione certificati.
-10. Rimozione eventuale della password MQTT se l’identità certificato è sufficiente.
+1. Task end-to-end su `worker-2` tramite gateway.
+2. Test ACL negative fra `worker-1` e `worker-2`.
+3. Test di reconnect e ripristino dopo riavvio worker.
+4. CI GitHub Actions per `pytest`, `go vet`, `go test` e build Linux amd64.
+5. Scansione segreti automatica sulla PR.
+6. Test di integrazione mTLS end-to-end con broker effimero.
+7. Persistenza idempotenza worker con write atomico o registro append-only.
+8. Metriche Prometheus per gateway, worker e broker.
+9. Rotazione e revoca certificati.
+10. Hardening systemd: `ProtectSystem`, `ProtectHome`, `NoNewPrivileges`, `PrivateTmp`, dove compatibili.
+11. Decisione esplicita e documentata su esposizione della porta WSS 8443.
+12. Runbook operativo per incident response e rotazione certificati.
 
 ## Regole operative per l’agente
 
@@ -150,4 +176,5 @@ Prerequisiti fuori da Git:
 - Non inserire segreti nei file, nei test o nei log.
 - Non indebolire TLS, ACL, sandbox o validazione certificati.
 - Eseguire sempre test Python e Go prima di proporre un merge.
+- Distinguere sempre stato live verificato, test superati e test pianificati.
 - Documentare ogni modifica con commit chiari e PR descrittive.

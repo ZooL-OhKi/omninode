@@ -1,0 +1,17 @@
+[Unit]
+Description=Omninode Gateway Resident Service
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=omninode
+WorkingDirectory=/opt/omninode/node1-gateway
+ExecStart=/opt/omninode/node1-gateway/venv/bin/python main.py
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

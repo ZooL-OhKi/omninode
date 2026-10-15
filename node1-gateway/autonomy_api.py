@@ -51,6 +51,14 @@ class DomResponseRequest(BaseModel):
     raw_dom_markdown_or_code: str = Field(min_length=1, max_length=1000000)
 
 
+class RollbackRequest(BaseModel):
+    path: str = Field(min_length=1, max_length=512)
+
+
+class CommandVerifyRequest(BaseModel):
+    preset: str = Field(min_length=1, max_length=64)
+
+
 class AutonomyService:
     def __init__(self, repo_root: Optional[Path] = None, audit: Optional[AuditEventEngine] = None,
                  helper_factory: Optional[Callable[[], BrowserWebAIHelper]] = None,
@@ -70,16 +78,27 @@ class AutonomyService:
             self.policy.grant({"agent_id": AGENT_ID, "goal_id": goal_id, "capability": cap,
                                "workspace": str(self.repo_root.resolve()), "expires_at": expires, "node_id": NODE_ID})
 
-    def _loop(self, goal_id: str, use_helper: bool, max_attempts: int) -> SelfHostingWorkLoop:
-        self._grant(goal_id)
-
+    def _guard(self, goal_id: str):
         def guard(capability: str, resource: str, action: str) -> None:
             allowed, audit_id = self.policy.authorize(AGENT_ID, goal_id, capability, resource, action)
             if not allowed:
                 raise PermissionError(f"denied by policy ({capability}), audit {audit_id}")
+        return guard
 
-        ws = RepoWorkspace(self.repo_root, guard=guard)
-        ver = VerificationExecutor(self.repo_root, guard=guard, audit=self.audit, agent_id=AGENT_ID,
+    def _workspace(self, goal_id: str) -> RepoWorkspace:
+        self._grant(goal_id)
+        return RepoWorkspace(self.repo_root, guard=self._guard(goal_id))
+
+    def _verifier(self, goal_id: str) -> VerificationExecutor:
+        self._grant(goal_id)
+        return VerificationExecutor(self.repo_root, guard=self._guard(goal_id), audit=self.audit,
+                                    agent_id=AGENT_ID, goal_id=goal_id, presets=self.presets)
+
+    def _loop(self, goal_id: str, use_helper: bool, max_attempts: int) -> SelfHostingWorkLoop:
+        self._grant(goal_id)
+
+        ws = RepoWorkspace(self.repo_root, guard=self._guard(goal_id))
+        ver = VerificationExecutor(self.repo_root, guard=self._guard(goal_id), audit=self.audit, agent_id=AGENT_ID,
                                    goal_id=goal_id, presets=self.presets)
         helper = self.helper_factory() if use_helper else None
         return SelfHostingWorkLoop(ws, ver, audit=self.audit, helper=helper, max_attempts=max_attempts,
@@ -120,6 +139,18 @@ class AutonomyService:
             task_store.update_task_status(goal_id, "running")
         threading.Thread(target=worker, name=goal_id, daemon=True).start()
         return goal_id
+
+    def workspace_list(self, subpath: str = "") -> dict[str, Any]:
+        return self._workspace(f"ws-list-{uuid.uuid4().hex[:12]}").list(subpath)
+
+    def workspace_read(self, path: str) -> dict[str, Any]:
+        return self._workspace(f"ws-read-{uuid.uuid4().hex[:12]}").read(path)
+
+    def workspace_rollback(self, path: str) -> dict[str, Any]:
+        return self._workspace(f"ws-rollback-{uuid.uuid4().hex[:12]}").rollback(path)
+
+    def command_verify(self, preset: str) -> dict[str, Any]:
+        return self._verifier(f"verify-{uuid.uuid4().hex[:12]}").run(preset)
 
 
 def build_router(auth_dependency: Callable[..., Any], service: Optional[AutonomyService] = None) -> APIRouter:
@@ -170,5 +201,45 @@ def build_router(auth_dependency: Callable[..., Any], service: Optional[Autonomy
             time.sleep(0.25)
 
         return {"goal_id": req.goal_id, "status": "accepted", "detail": "browser response submitted; autonomy step still running"}
+
+    @router.get("/workspace/list")
+    def workspace_list(subpath: str = "") -> dict[str, Any]:
+        try:
+            return svc().workspace_list(subpath)
+        except PermissionError as exc:
+            raise HTTPException(403, str(exc)) from exc
+        except (FileNotFoundError, ValueError) as exc:
+            raise HTTPException(400, str(exc)) from exc
+
+    @router.get("/workspace/read")
+    def workspace_read(path: str) -> dict[str, Any]:
+        try:
+            return svc().workspace_read(path)
+        except PermissionError as exc:
+            raise HTTPException(403, str(exc)) from exc
+        except FileNotFoundError as exc:
+            raise HTTPException(404, str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+
+    @router.post("/workspace/rollback")
+    def workspace_rollback(req: RollbackRequest) -> dict[str, Any]:
+        try:
+            return svc().workspace_rollback(req.path)
+        except PermissionError as exc:
+            raise HTTPException(403, str(exc)) from exc
+        except KeyError as exc:
+            raise HTTPException(404, str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+
+    @router.post("/command/verify")
+    def command_verify(req: CommandVerifyRequest) -> dict[str, Any]:
+        try:
+            return svc().command_verify(req.preset)
+        except PermissionError as exc:
+            raise HTTPException(403, str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
 
     return router

@@ -64,7 +64,6 @@ func ParseNaturalWriteCommand(prompt, defaultAgent, defaultPath string) (agentID
 		agentID = "archivista"
 	}
 
-	// Cerca un nome file esplicito (es. appunti.txt, note.md, test-1.log)
 	reFile := regexp.MustCompile(`(?i)\b([a-z0-9_\-\.]+\.(txt|md|json|log|yaml|yml|csv))\b`)
 	if matches := reFile.FindStringSubmatch(p); len(matches) > 1 {
 		path = matches[1]
@@ -74,7 +73,6 @@ func ParseNaturalWriteCommand(prompt, defaultAgent, defaultPath string) (agentID
 		path = fmt.Sprintf("appunti-%d.txt", time.Now().Unix())
 	}
 
-	// Se c'è ":" usa tutto ciò che segue come contenuto, altrimenti usa l'intero testo
 	if idx := strings.Index(p, ":"); idx != -1 && idx+1 < len(p) {
 		content = strings.TrimSpace(p[idx+1:])
 	} else {
@@ -120,8 +118,9 @@ func forwardJSONRPC(r *http.Request, gatewayURL, mcpSecret, method string, param
 	return resp.StatusCode, respBytes, taskID, err
 }
 
-// NewUIHandler costruisce l'handler HTTP con asset PWA embedded e proxy sicuro verso il Gateway MCP
-func NewUIHandler(gatewayURL string, mcpSecret string) (http.Handler, error) {
+// NewUIHandler costruisce l'handler HTTP con asset PWA embedded e proxy sicuro verso il Gateway MCP.
+// Il parametro variadic bridge è opzionale per mantenere compatibilità con i chiamanti esistenti.
+func NewUIHandler(gatewayURL string, mcpSecret string, bridge ...*BridgeService) (http.Handler, error) {
 	subFS, err := fs.Sub(uiAssets, "ui")
 	if err != nil {
 		return nil, fmt.Errorf("errore caricamento asset UI: %w", err)
@@ -143,6 +142,10 @@ func NewUIHandler(gatewayURL string, mcpSecret string) (http.Handler, error) {
 			"history":   hist,
 		})
 	})
+
+	if len(bridge) == 1 && bridge[0] != nil {
+		mux.Handle("/api/bridge/execute", bridge[0])
+	}
 
 	mux.HandleFunc("/api/task/write", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {

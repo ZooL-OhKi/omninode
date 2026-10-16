@@ -5,6 +5,7 @@ import re
 import sys
 import threading
 from native_channel import DesktopChannel, read_message, write_message
+from native_bootstrap import initial_request
 
 
 def validate_peer(peer, expected):
@@ -18,10 +19,13 @@ def main():
                   os.environ.get("OMNINODE_NATIVE_ORIGIN", ""))
     if sys.platform != "win32":
         raise RuntimeError("desktop host supports Windows only")
-    from desktop_control import DesktopSession, windows_backend
     import msvcrt
     msvcrt.setmode(sys.stdin.fileno(), os.O_BINARY)
     msvcrt.setmode(sys.stdout.fileno(), os.O_BINARY)
+    first = initial_request(sys.stdin.buffer, sys.stdout.buffer)
+    if first is None:
+        return
+    from desktop_control import DesktopSession, windows_backend
     import tkinter as tk
     from tkinter import messagebox
     root = tk.Tk()
@@ -74,10 +78,6 @@ def main():
     def worker():
         channel = None
         try:
-            first = read_message(sys.stdin.buffer)
-            if (not first or set(first) != {"type", "conversation"} or first["type"] != "open"
-                    or not isinstance(first["conversation"], str) or not 1 <= len(first["conversation"]) <= 1024):
-                raise ValueError("first message must identify the conversation")
             done = threading.Event()
             events.put(("consent", first, done))
             while not done.wait(0.1):

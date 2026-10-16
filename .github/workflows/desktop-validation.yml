@@ -49,3 +49,16 @@ jobs:
         env:
           OMNINODE_BROWSER_INTEGRATION: '1'
         run: python -m unittest -v test_native_browser
+  native-windows-setup:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install in temp venv and verify real launcher without desktop access
+        working-directory: desktop
+        env:
+          OMNINODE_WINDOWS_SETUP_TEST: '1'
+        run: python -m unittest -v test_windows_native_setup

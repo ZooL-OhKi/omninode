@@ -2,6 +2,7 @@ package main
 
 import (
 	"log"
+	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
@@ -15,8 +16,53 @@ func requiredEnv(name string) string {
 	return value
 }
 
+func startOptionalUIServer() *http.Server {
+	uiAddr := os.Getenv("UI_LISTEN_ADDR")
+	if uiAddr == "" {
+		return nil
+	}
+	gatewayURL := os.Getenv("GATEWAY_URL")
+	if gatewayURL == "" {
+		gatewayURL = "http://127.0.0.1:8000"
+	}
+	mcpSecret := os.Getenv("MCP_SECRET")
+
+	handler, err := NewUIHandler(gatewayURL, mcpSecret)
+	if err != nil {
+		log.Fatalf("[OmniClient] impossibile inizializzare UI server: %v", err)
+	}
+
+	srv := &http.Server{
+		Addr:    uiAddr,
+		Handler: handler,
+	}
+
+	go func() {
+		log.Printf("[OmniClient] Web UI / PWA attiva su http://%s (Gateway: %s)", uiAddr, gatewayURL)
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Fatalf("[OmniClient] errore UI server: %v", err)
+		}
+	}()
+	return srv
+}
+
 func main() {
+	signals := make(chan os.Signal, 1)
+	signal.Notify(signals, syscall.SIGINT, syscall.SIGTERM)
+
+	// Modalita Standalone Web UI / PWA (per Custom Browser, Mobile e Cloudflare Tunnel)
+	if os.Getenv("UI_ONLY") == "1" {
+		if os.Getenv("UI_LISTEN_ADDR") == "" {
+			_ = os.Setenv("UI_LISTEN_ADDR", "127.0.0.1:8080")
+		}
+		startOptionalUIServer()
+		<-signals
+		log.Println("[OmniClient] arresto UI standalone")
+		return
+	}
+
 	log.Println("[OmniClient] avvio worker OmniNode")
+	startOptionalUIServer()
 
 	brokerURL := requiredEnv("OMNINODE_MQTT_BROKER")
 	nodeID := requiredEnv("OMNINODE_NODE_ID")
@@ -49,8 +95,6 @@ func main() {
 	stop := make(chan struct{})
 	go startHeartbeatLoop(client, nodeID, []string{agentID}, stop)
 
-	signals := make(chan os.Signal, 1)
-	signal.Notify(signals, syscall.SIGINT, syscall.SIGTERM)
 	<-signals
 
 	log.Println("[OmniClient] arresto richiesto")

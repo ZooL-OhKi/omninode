@@ -185,9 +185,9 @@ func (s *OmninodeServer) handleBrowseWebpage(ctx context.Context, req *mcp.CallT
 
 // WorkspaceWriteInput definisce l'input per il tool workspace.write
 type WorkspaceWriteInput struct {
-	WorkspaceID  string `json:"workspace_id" jsonschema:"ID del workspace autorizzato (es: 'temporary')"`
-	Path         string `json:"path" jsonschema:"Percorso relativo del file all'interno del workspace"`
-	Content      string `json:"content" jsonschema:"Contenuto del file da scrivere"`
+	WorkspaceID string `json:"workspace_id" jsonschema:"ID del workspace autorizzato (es: 'temporary')"`
+	Path        string `json:"path" jsonschema:"Percorso relativo del file all'interno del workspace"`
+	Content     string `json:"content" jsonschema:"Contenuto del file da scrivere"`
 }
 
 // WorkspaceWriteOutput definisce l'output del tool workspace.write
@@ -416,13 +416,13 @@ type OmninodeCommandVerifyInput struct {
 }
 
 type OmninodeCommandVerifyOutput struct {
-	Preset     string         `json:"preset"`
-	Status     string         `json:"status"`
-	Passed     bool           `json:"passed"`
-	ExitCode   int            `json:"exit_code"`
-	Stdout     string         `json:"stdout,omitempty"`
-	Stderr     string         `json:"stderr,omitempty"`
-	RawResult  map[string]any `json:"-"`
+	Preset    string         `json:"preset"`
+	Status    string         `json:"status"`
+	Passed    bool           `json:"passed"`
+	ExitCode  int            `json:"exit_code"`
+	Stdout    string         `json:"stdout,omitempty"`
+	Stderr    string         `json:"stderr,omitempty"`
+	RawResult map[string]any `json:"-"`
 }
 
 func (s *OmninodeServer) handleOmninodeCommandVerify(ctx context.Context, req *mcp.CallToolRequest, input OmninodeCommandVerifyInput) (*mcp.CallToolResult, OmninodeCommandVerifyOutput, error) {

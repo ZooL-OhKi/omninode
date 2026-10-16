@@ -158,9 +158,9 @@ func TestOmninodeWorkspaceReadDecodesGatewayResult(t *testing.T) {
 func TestOmninodeAutonomyStepCallsAtomicRunStep(t *testing.T) {
 	gateway := &fakeGateway{
 		autonomyResult: map[string]any{
-			"status":       "committed",
+			"status":        "committed",
 			"changed_files": []string{"node1-gateway/ok.py"},
-			"rolled_back":  false,
+			"rolled_back":   false,
 		},
 	}
 	server := NewOmninodeServerWithGateway(gateway)

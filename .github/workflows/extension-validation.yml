@@ -27,5 +27,6 @@ jobs:
           node --check omniclient/extension/content.js
           node --check omniclient/extension/background.js
           node --check omniclient/extension/options.js
-      - name: Run parser and delivery guard tests
-        run: node --test omniclient/extension/adapter.test.cjs
+          node --check omniclient/extension/native_client.js
+      - name: Run adapter and native client unit tests
+        run: node --test omniclient/extension/*.test.cjs

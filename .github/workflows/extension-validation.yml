@@ -24,9 +24,6 @@ jobs:
           node-version: '22'
       - name: Validate extension JavaScript syntax
         run: |
-          node --check omniclient/extension/content.js
-          node --check omniclient/extension/background.js
-          node --check omniclient/extension/options.js
-          node --check omniclient/extension/native_client.js
-      - name: Run adapter and native client unit tests
+          for file in omniclient/extension/*.js; do node --check "$file"; done
+      - name: Run adapter, native client and broker unit tests
         run: node --test omniclient/extension/*.test.cjs

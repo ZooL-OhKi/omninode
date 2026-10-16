@@ -56,6 +56,16 @@ func (h *WorkspaceHandler) saveProcessed() error {
 	return os.WriteFile(h.storePath, data, 0o600)
 }
 
+func (h *WorkspaceHandler) rollbackProcessed(taskID string, executionErr error) error {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	delete(h.processed, taskID)
+	if saveErr := h.saveProcessed(); saveErr != nil {
+		return fmt.Errorf("rollback idempotenza non riuscito: %v; errore originale: %w", saveErr, executionErr)
+	}
+	return executionErr
+}
+
 func (h *WorkspaceHandler) Execute(envelope TaskEnvelope) (json.RawMessage, error) {
 	if envelope.TaskID == "" {
 		return nil, errors.New("task_id mancante")
@@ -79,13 +89,7 @@ func (h *WorkspaceHandler) Execute(envelope TaskEnvelope) (json.RawMessage, erro
 
 	result, err := h.execute(envelope)
 	if err != nil {
-		h.mu.Lock()
-		delete(h.processed, envelope.TaskID)
-		if saveErr := h.saveProcessed(); saveErr != nil {
-			return nil, fmt.Errorf("rollback idempotenza non riuscito: %v; errore originale: %w", saveErr, err)
-		}
-		h.mu.Unlock()
-		return nil, err
+		return nil, h.rollbackProcessed(envelope.TaskID, err)
 	}
 	return result, nil
 }

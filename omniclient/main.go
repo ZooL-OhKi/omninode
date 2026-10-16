@@ -31,6 +31,9 @@ func startOptionalUIServer() *http.Server {
 	workspaceRoot := os.Getenv("OMNINODE_WORKSPACE_ROOT")
 	bridgeToken := os.Getenv("OMNINODE_BRIDGE_TOKEN")
 	if workspaceRoot != "" && bridgeToken != "" {
+		if err := os.MkdirAll(workspaceRoot, 0o750); err != nil {
+			log.Fatalf("[OmniClient] impossibile creare il workspace root %s: %v", workspaceRoot, err)
+		}
 		workspace := NewWorkspaceHandler(workspaceRoot)
 		allowedOrigin := os.Getenv("OMNINODE_ALLOWED_ORIGIN")
 		if allowedOrigin == "" {

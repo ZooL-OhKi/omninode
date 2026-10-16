@@ -10,6 +10,7 @@ from fastapi import FastAPI, Depends, HTTPException, Request, Header
 from fastapi.responses import JSONResponse, FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 import aiomqtt
+import task_store
 
 from mqtt_topics import MQTTTopics
 from mqtt_service import mqtt_service
@@ -51,8 +52,10 @@ async def lifespan(app: FastAPI):
     task_store.init_db() if hasattr(task_store, "init_db") else None
     mqtt_service.set_broadcast_callback(broadcast_handler)
     await mqtt_service.start()
-    yield
-    await mqtt_service.stop()
+    try:
+        yield
+    finally:
+        await mqtt_service.stop()
 
 
 app = FastAPI(title="OmniNode Gateway", lifespan=lifespan)
@@ -89,7 +92,7 @@ def readyz():
 async def sse_stream(request: Request):
     queue = asyncio.Queue()
     sse_clients_list.append(queue)
-    await queue.put(f"event: node_update\ndata: {json.dumps({n: d['info'] for n, d in mqtt_service.active_nodes.items()})}\\n\\n")
+    await queue.put(f"event: node_update\ndata: {json.dumps({n: d['info'] for n, d in mqtt_service.active_nodes.items()})}\n\n")
 
     async def generator():
         try:

@@ -3,6 +3,7 @@ import base64
 import json
 import secrets
 import struct
+from screen_preview import compact_screenshot
 
 MAX_INPUT = 131072
 MAX_OUTPUT = 1048576
@@ -69,7 +70,7 @@ class DesktopChannel:
         result = self.session.execute(self.session.credential(), self.conversation,
                                       request["action"], request["args"])
         if isinstance(result, dict) and isinstance(result.get("data"), bytes):
-            result = dict(result)
+            result = compact_screenshot(result)
             result["data_base64"] = base64.b64encode(result.pop("data")).decode("ascii")
         return {"session_id": self.session_id, "sequence": request["sequence"], "result": result}
 

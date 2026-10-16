@@ -17,8 +17,8 @@ document.getElementById("stop").onclick=async()=>{await send({type:"desktop-stop
 document.getElementById("capture").onclick=async()=>{
   const result=await send({type:"desktop-execute",action:"screenshot",args:{}});
   const image=result?.result;
-  if (image?.mime === "image/png" && typeof image.data_base64 === "string" && image.data_base64.length <= 1048576 && /^[A-Za-z0-9+/]*={0,2}$/.test(image.data_base64)) {
-    document.getElementById("preview").src="data:image/png;base64," + image.data_base64;
+  if (["image/png","image/jpeg"].includes(image?.mime) && typeof image.data_base64 === "string" && image.data_base64.length <= 1048576 && /^[A-Za-z0-9+/]*={0,2}$/.test(image.data_base64)) {
+    document.getElementById("preview").src="data:" + image.mime + ";base64," + image.data_base64;
   }
 };
 for (const button of document.querySelectorAll("[data-provider]")) button.onclick=()=>send({type:"ai-open",provider:button.dataset.provider});

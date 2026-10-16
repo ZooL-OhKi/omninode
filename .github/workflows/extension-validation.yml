@@ -1,0 +1,29 @@
+name: Extension validation
+
+on:
+  push:
+    paths:
+      - 'omniclient/extension/**'
+      - '.github/workflows/extension-validation.yml'
+  pull_request:
+    paths:
+      - 'omniclient/extension/**'
+      - '.github/workflows/extension-validation.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  adapter-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Validate extension JavaScript syntax
+        run: |
+          for file in omniclient/extension/*.js; do node --check "$file"; done
+      - name: Run adapter, native client and broker unit tests
+        run: node --test omniclient/extension/*.test.cjs

@@ -1,8 +1,9 @@
-# Phase 4 — MQTT over WSS & Versioned Topics (Swarm Fabric v5.0)
+# Trasporto MQTT/WSS: contesto e requisiti
 
-## Architettura e Trasporto
-- **Topic Versionati:** Supporto per i topic isolati per-nodo (`omninode/v1/nodes/{node_id}/tasks`, `responses`, `heartbeat`) accanto alla modalità `legacy`.
-- **Configurazione Dual-Topic:** Gestita tramite la variabile d'ambiente `OMNINODE_MQTT_TOPIC_VERSION=v1|legacy` con controllo fail-fast all'avvio.
-- **Envelope Canonico:** Obbligo di `schema_version: 1`, `message_id` (UUID v4) per l'idempotenza e validazione rigorosa del `node_id` rispetto all'identità MQTT autenticata per prevenire spoofing e violazioni ACL.
-- **Trasporto WSS & Resilienza:** Client Go e Gateway configurati con trasporto WebSocket Secure (`wss://.../mqtt` su porta 443), Keep-Alive a 30s per evitare timeout di Cloudflare, e riconnessione con backoff esponenziale e jitter.
-- **ACL Mosquitto:** Isolamento rigoroso per identità; ciascun client può pubblicare o sottoscrivere esclusivamente sui topic di propria competenza.
+Aggiornamento: 16 ottobre 2026. [Stato corrente](CURRENT_STATUS.md).
+
+Le vecchie note su porta 443, modalita legacy e WSS universale non sono la configurazione deploy/mosquitto corrente. Il file di configurazione prevede MQTT 8883 e WebSocket TLS 8443; la presenza di listener non ne prova esposizione, raggiungibilita o deploy.
+
+Questo documento non certifica implementazioni o servizi live. Conservare le invarianti mTLS, verifica identita, ACL v1, workspace e approvazioni; non applicare configurazioni storiche come comandi di produzione.
+
+[Versione storica completa alla baseline](https://github.com/ZooL-OhKi/omninode/blob/b669ec404007e01d56b12d502887f695895a8ae1/docs/PHASE_4_MQTT_WSS.md). Per procedere usare codice, configurazioni effettive e output delle verifiche, non il nome della fase.

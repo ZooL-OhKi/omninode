@@ -1,11 +1,7 @@
-# Gemini adapter correction
+# Adapter Gemini: esperimento disabilitato
 
-Status: experimental; not certified operational.
+[Stato corrente](CURRENT_STATUS.md). Il manifest 0.2.0 non carica content.js o background.js: il flusso automatico Gemini/HTTP precedente non e il prodotto operativo corrente.
 
-Changes: read rendered pre/code within new model-response elements instead of literal Markdown fences across document.body; ignore pre-activation elements; bind to conversation URL; visible errors; preserve nonempty drafts; stop and session limits; correlated result insertion and conditional automatic send.
+L'esperimento iniziale cercava backtick nel testo renderizzato e non funzionava nella prova dell'utente. La correzione leggeva nuovi model-response/pre e richiedeva aria-busy=false o data-is-streaming=false, attributi verificati solo nelle fixture. Restano rischi di esempi citati, provenienza e completamento reale dello streaming.
 
-Execution requires explicit aria-busy=false or data-is-streaming=false on model-response. These attributes are fixture assumptions, NOT verified against the user's live Gemini DOM. Missing completion evidence blocks execution. A stable text interval alone never authorizes execution. Quoted examples inside new assistant replies remain an unresolved protocol-authenticity risk: do not certify this adapter for unattended use.
-
-Executed in assistant environment: Node parser/delivery unit tests 16 passed; Chromium synthetic DOM checks 7 passed (history, streaming, unknown completion, rendered JSON, draft preservation, conditional send, stop). Bridge was mocked. No real Gemini login, live local filesystem effect, or native extension service-worker integration was tested.
-
-Core issues still open: concurrent and crash-safe payload idempotency, removal of third in-memory registry, loopback listener enforcement, caller sessions and revocation, metadata protection, actual extension Origin validation. No merge, deploy, or Windows update performed by this patch.
+Le prove storiche comprendevano 16 test parser/delivery e 7 controlli Chromium con bridge simulato; non una chat Gemini reale o un file creato end-to-end. Il codice resta per revisione e test, non per riattivazione automatica. Non eliminare content.js senza aggiornare adapter.test.cjs e verificare riferimenti.

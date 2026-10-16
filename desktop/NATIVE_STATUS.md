@@ -1,9 +1,9 @@
-# Native desktop channel
+# Host Native Messaging
 
-Implemented: length-prefixed JSON over stdin/stdout, strict JSON decoding, 128 KiB incoming and 1 MiB outgoing frame limits, per-process session identifier, monotonic sequence consumed before effect, no automatic retry, Windows binary pipe mode, extension-origin check, local Tk consent and visible STOP. The desktop credential never leaves the host. No network listener is opened.
+[Stato corrente](../docs/CURRENT_STATUS.md). Canale stdin/stdout JSON con lunghezza prefissata, input massimo 128 KiB e output 1 MiB; non e un endpoint MCP o HTTP.
 
-Native host startup expects the browser-supplied extension origin as argv[1] and an identical trusted OMNINODE_NATIVE_ORIGIN configured by a future installer. It refuses to start without a matching chrome-extension origin. Opening a host channel requires a first message with type=open and conversation, followed by explicit local approval. Actions require session_id, sequence, action, args. Closing the channel revokes the session. STOP revokes input but cannot undo already delivered events; disconnect detection during a blocking OS call is not immediate.
+native_host.py verifica origine browser/OMNINODE_NATIVE_ORIGIN, richiede un primo messaggio open con conversazione e consenso locale. Le azioni hanno session_id, sequence, action e args. La sequenza e consumata prima dell'effetto: dopo errore o timeout non ripetere input automaticamente. La credenziale desktop resta nel processo host.
 
-Executed in assistant environment: Python compilation and 14 native protocol/dispatch tests passed with mock desktop session. The existing 15 primitive tests are separate; CI now discovers both suites. Tk consent, Windows binary pipes, native extension launch and physical desktop control were NOT exercised here.
+Installer e client browser ora sono presenti. STOP/disconnessione/scadenza devono revocare gli input successivi, ma non annullano eventi consegnati; rilevamento di disconnect durante chiamate OS bloccanti non e immediato. [Preview](SCREEN_STATUS.md) gestisce il limite del messaggio.
 
-Not installed, registered, connected to the extension, or available from the current web chat. No installer or browser-side native port is included in this patch. Native screenshots larger than the frame limit are rejected and stop the session; resizing/chunking remains to implement. Full chat-to-desktop and multi-AI coordination remain incomplete. Existing Go workspace bridge and MQTT security are unchanged.
+I test di protocollo e la fixture Chromium sono verificati, non consenso o pipe Windows reali. Il percorso non e ancora utilizzabile automaticamente da questa conversazione. Nessuna modifica a MQTT o al workspace Go consegue alla presenza del canale nativo.

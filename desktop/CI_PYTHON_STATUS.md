@@ -1,9 +1,7 @@
-# Shared gateway test prerequisites
+# Prerequisiti dei test gateway
 
-Verified before this patch: at 89ec3642e8d2c4dd315a853aba096c5481f3f694 the native-browser integration, Windows/Linux desktop unit jobs, extension, Go and secret scan were successful. The legacy Python Gateway & Scripts Pytest job remained failed while Recovery's python job passed.
+[Stato corrente](../docs/CURRENT_STATUS.md). La correzione e pubblicata in f8e7500fd52863b998b187285a832b17c2b129f2; b669ec4 ha lo stesso messaggio e non e una nuova funzionalita. Alla baseline entrambi i job Python erano success.
 
-Source inspection proved that test_browser_runtime.py imports Playwright and launches Chromium; the legacy job installed only requirements.txt, which did not declare Playwright or pytest-asyncio and did not install Chromium. Recovery already installed these prerequisites separately. Full remote logs were unavailable, so this is a proven configuration defect, not a claim that it is the only possible failure.
+Il workflow storico installava requirements.txt senza Playwright/Chromium e plugin asyncio richiesti dai test. Ora ci.yml e recovery-validation.yml condividono node1-gateway/requirements-test.txt e installano Chromium. requirements.txt di runtime non e stato modificato; gli intervalli test non costituiscono un lock completo.
 
-Both gateway CI paths now use node1-gateway/requirements-test.txt and install Chromium explicitly. Runtime requirements.txt is unchanged. Version ranges are declared, not a fully locked environment. Nothing is installed globally on the user's PC. No gateway code, TLS, ACL, shell policy, test assertions or existing Go/security-scan jobs are changed.
-
-Validation in assistant environment: original workflow blob hashes matched the remote files exactly; updated YAML parsed; embedded Python hygiene script parsed; secret-scan and Go job structures were unchanged. Expected updated Git blob hashes: ci.yml 4f78267f348a6c59765b5182d8df646fe1eb59b4; recovery-validation.yml 8ddb8169b8a6b67c97dca1759465f8ed25b2459b. Full pytest execution remains for CI to verify. Desktop operation from the web chat remains incomplete; no Windows copy or VPS was updated or deployed.
+I blob modificati verificati erano ci.yml 4f78267f348a6c59765b5182d8df646fe1eb59b4 e recovery-validation.yml 8ddb8169b8a6b67c97dca1759465f8ed25b2459b. Job Go e security scan erano invariati. Success di pytest non dimostra una chat web o un deploy, e non installa nulla sul PC dell'utente.

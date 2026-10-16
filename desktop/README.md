@@ -1,13 +1,9 @@
-# OmniNode desktop primitives
+# Componente desktop sperimentale
 
-Experimental library, NOT an operational chat-to-desktop bridge.
+[Stato corrente](../docs/CURRENT_STATUS.md). La libreria non e da sola un agente operativo dalla chat.
 
-No listener, autostart, shell endpoint, installer, or privilege elevation. Importing this module does not capture the screen or inject input. Native dependencies are separate from the gateway. Use only in a dedicated local virtualenv, never install them globally for the gateway.
+Sono presenti DesktopSession, backend Windows PyAutoGUI, host Native Messaging con consenso Tk/STOP, installer per utente, preview e client browser. Nessun listener di rete o elevazione automatica. La concessione locale e distinta dal workspace remoto.
 
-After explicit local consent, a trusted local coordinator may create DesktopSession(windows_backend(), conversation_id). The credential belongs only in trusted local contexts. This library does not verify browser origins, provide a consent window, or authorize arbitrary web callers. Do not expose it over HTTP or wire it into the existing bridge before authentication, consent UI, request lifecycle, and stop handling are implemented.
+Azioni: screenshot, move, click, scroll, press, hotkey, type, drag. Limiti: display principale, testo ASCII stampabile fino a 4096 caratteri, sessione host di 10 minuti; Unicode, multi-monitor e DPI da completare. Fail-safe attivo; stop non annulla eventi gia consegnati e il rilascio dei tasti non e garantito contro ogni guasto.
 
-Actions: screenshot, move, click, scroll, press, hotkey, type, drag. Screenshots are returned as PNG bytes in memory and are not written to disk. Mouse bounds are the primary display only. Keyboard text is printable ASCII only; Unicode is explicitly rejected pending a native Windows backend. No clipboard modification.
-
-Sessions expire (default 10 minutes, maximum 15), bind to a conversation identifier, validate credentials, and can be stopped. Stop prevents subsequent primitives; it cannot undo an input event already delivered to the OS. PyAutoGUI corner fail-safe remains enabled. Key/button cleanup is attempted in finally; OS and backend failures can still prevent release and require further hardening. No crash/retry guarantee exists for input actions: never automatically retry a timed-out click or keystroke.
-
-Executed in assistant environment: 15 unit tests passed with fake input/screenshot backend. No native Windows input, real screenshot, or chat transport was tested. CI unit tests on Windows/Linux are not a live desktop demonstration. Missing: visible local consent/stop UI, Unicode and multi-monitor support, Go integration, authenticated browser transport, screenshot return into this conversation, and real desktop E2E evidence. Existing MQTT TLS/ACL and workspace policies are unchanged.
+Non ripetere input dopo un timeout. [Host](NATIVE_STATUS.md), [installer](INSTALL_STATUS.md), [browser](BROWSER_CLIENT_STATUS.md), [immagini](SCREEN_STATUS.md). I test Windows/Linux usano backend simulati; la prova fisica sul PC dell'utente manca.

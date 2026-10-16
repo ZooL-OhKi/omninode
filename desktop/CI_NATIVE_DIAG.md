@@ -1,9 +1,7 @@
-# Native fixture CI reproducibility
+# Test nativo sintetico e riproducibilita
 
-At commit 78c991e26517497ca81ff12beaaad34b6ed1fe44, GitHub reported native-browser failure while extension and Windows/Linux desktop unit jobs passed. The separate Python Gateway & Scripts Pytest job also remained failed. Full remote logs were not retrievable using the available connector/fetch tools, so no root cause is claimed.
+[Stato corrente](../docs/CURRENT_STATUS.md). Il fallimento native-browser a 78c991e e storico: alla baseline b669ec4 il job e success. Non e stata determinata con certezza la causa unica del primo fallimento.
 
-The assistant's actually verified fixture environment was Python 3.12.8, Playwright 1.51.0, Pillow 12.2.0 and Chromium 134.0.6998.35. The isolated native-browser CI job now pins the two Python dependencies to those verified versions; production desktop requirements and the user's browser are NOT downgraded. This old bundled Chromium is for synthetic tests only: never use it for live browsing, account logins or untrusted web content.
+La fixture Linux usa Playwright 1.51.0 e Pillow 12.2.0, versioni provate nell'ambiente dell'assistente; il Chromium 134 associato e soltanto per immagini generate e test isolati, mai per account reali o contenuti web non affidabili. Le dipendenze del prodotto non sono state retrocesse.
 
-The temporary Linux fixture launcher now explicitly supplies the interpreter's configured shared-library directory and captures fixture stderr for failure diagnostics. This is a portability precaution, not proof that shared-library loading caused the original CI failure. Two actual local Chromium native messaging probes passed (direct interpreter and portable launcher). The updated full synthetic-image native browser test then passed as a separate unittest process with the pinned dependencies in the assistant environment.
-
-A new CI run is required to verify the remote result. This patch does not repair or certify the separate legacy Python gateway job, does not test Windows native consent or real desktop input, and does not complete the chat adapter. No user's screen, account or local repository was accessed or updated by this change.
+Il launcher temporaneo configura la directory delle librerie Python e raccoglie stderr. Il test usa un profilo Chromium temporaneo, un manifest con origine esatta e un host fixture: handshake e JPEG correlati sono stati osservati realmente. Non prova launcher .cmd, registro Windows, consenso Tk o input fisico. Non abilita il test contro profili o desktop reali.

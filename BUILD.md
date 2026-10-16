@@ -38,4 +38,4 @@ Per il test nativo sintetico usare esclusivamente l'ambiente isolato descritto i
 
 ## Limiti di release
 
-Non eseguire automaticamente tag, restart, deploy, pkill, pulizia di modcache o reset per risolvere errori. build.yml e una pipeline storica separata: Go 1.21 e matrice runner devono essere revisionati prima di main/tag. I check verdi della PR non certificano quella pipeline o tutte lepiattaforme.
+Non eseguire automaticamente tag, restart, deploy, pkill, pulizia di modcache o reset per risolvere errori. build.yml e una pipeline storica separata: Go 1.21 e matrice runner devono essere revisionati prima di main/tag. I check verdi della PR non certificano quella pipeline o tutte le piattaforme.

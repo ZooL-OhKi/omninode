@@ -1,0 +1,61 @@
+name: Recovery Validation
+
+on:
+  push:
+    branches: ['local-work-20261016-005605']
+  pull_request:
+    branches: ['ai-handover-20261015-worker2']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: recovery-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  go:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: omniclient
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: omniclient/go.mod
+          cache-dependency-path: omniclient/go.sum
+      - run: go mod verify
+      - run: go vet ./...
+      - run: go test -race -count=1 -timeout=120s ./...
+      - run: go build -o '${{ runner.temp }}/omniclient' .
+
+  python:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: node1-gateway
+    env:
+      MQTT_BROKER: '127.0.0.1'
+      MQTT_HOST: '127.0.0.1'
+      MQTT_PORT: '8883'
+      MQTT_USERNAME: gateway
+      MQTT_PASSWORD: ci-test-only-not-a-secret
+      MCP_SECRET: ci-test-only-mcp-secret
+      MQTT_CA_PATH: /tmp/omninode-ci-missing-ca.crt
+      MQTT_CERT_PATH: /tmp/omninode-ci-missing-client.crt
+      MQTT_KEY_PATH: /tmp/omninode-ci-missing-client.key
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: node1-gateway/requirements.txt
+      - run: python -m pip install -r requirements.txt pytest-asyncio playwright
+      - run: python -m playwright install --with-deps chromium
+      - run: python -m compileall -q . -x '(^|/)(\.venv|__pycache__)(/|$)'
+      - run: python -m pytest -v

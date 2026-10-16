@@ -27,6 +27,6 @@ jobs:
           python-version: '3.12'
       - name: Validate syntax
         run: python -m compileall -q desktop
-      - name: Test policy and desktop dispatch with fake backend
+      - name: Test desktop policy and native protocol with fake backends
         working-directory: desktop
-        run: python -m unittest -v test_desktop_control
+        run: python -m unittest discover -v

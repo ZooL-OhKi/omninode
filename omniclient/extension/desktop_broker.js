@@ -63,6 +63,33 @@ class OmniDesktopBroker {
   }
 
   async handle(message, sender) {
+    if (message?.type === "ai-bridge-request") {
+      const activation = this._assertActiveBridge(sender, message);
+      await this._assertCurrentConversation();
+      if (typeof message.request_id !== "string" || !REQUEST_ID.test(message.request_id)) throw new Error("Invalid request_id");
+      if (this.requests.has(message.request_id)) throw new Error("Duplicate request_id; request not re-executed");
+      if (this.requests.size >= this.maxRequests) { this.stop(); throw new Error("Request limit reached; session stopped"); }
+      if (!Number.isSafeInteger(message.issued_at) || message.issued_at < activation.issuedAt - 1000 || message.issued_at > Date.now() + 5000) throw new Error("Invalid request timestamp");
+      if (message.stream_state !== "settled") throw new Error("Response is not settled; refusing request");
+      const payload = message.payload;
+      if (!payload || Array.isArray(payload) || typeof payload !== "object") throw new Error("Invalid bridge payload");
+      if (Object.keys(payload).sort().join(",") !== "action,args") throw new Error("Invalid bridge payload schema");
+      if (typeof payload.action !== "string" || !ALLOWED_ACTIONS.includes(payload.action)) throw new Error("Unsupported desktop action");
+      if (!payload.args || Array.isArray(payload.args) || typeof payload.args !== "object") throw new Error("Invalid action arguments");
+
+      const requestId = message.request_id;
+      const expiresAt = Date.now() + this.requestTtl;
+      this.requests.set(requestId, {status:"pending", expiresAt});
+      try {
+        const result = await this.client.execute(payload.action, payload.args);
+        this.requests.set(requestId, {status:"completed", expiresAt, result});
+        return {ok:true, request_id:requestId, result};
+      } catch (error) {
+        this.requests.set(requestId, {status:"failed", expiresAt, error:String(error?.message || error)});
+        throw error;
+      }
+    }
+
     if (!this.trusted(sender)) throw new Error("Untrusted desktop caller");
     if (message.type === "desktop-stop") { this.stop(); return {ok:true}; }
     if (message.type === "desktop-status") return {ok:true, active:Boolean(this.owner && this.client.session), conversation:this.owner?.conversation || null};
@@ -89,33 +116,6 @@ class OmniDesktopBroker {
         this.api.action.setBadgeText({text:"ON"});
         return {ok:true, conversation, expires_at:expiresAt};
       } catch (error) { this.stop(); throw error; }
-    }
-
-    if (message.type === "ai-bridge-request") {
-      const activation = this._assertActiveBridge(sender, message);
-      await this._assertCurrentConversation();
-      if (typeof message.request_id !== "string" || !REQUEST_ID.test(message.request_id)) throw new Error("Invalid request_id");
-      if (this.requests.has(message.request_id)) throw new Error("Duplicate request_id; request not re-executed");
-      if (this.requests.size >= this.maxRequests) { this.stop(); throw new Error("Request limit reached; session stopped"); }
-      if (!Number.isSafeInteger(message.issued_at) || message.issued_at < activation.issuedAt - 1000 || message.issued_at > Date.now() + 5000) throw new Error("Invalid request timestamp");
-      if (message.stream_state !== "settled") throw new Error("Response is not settled; refusing request");
-      const payload = message.payload;
-      if (!payload || Array.isArray(payload) || typeof payload !== "object") throw new Error("Invalid bridge payload");
-      if (Object.keys(payload).sort().join(",") !== "action,args") throw new Error("Invalid bridge payload schema");
-      if (typeof payload.action !== "string" || !ALLOWED_ACTIONS.includes(payload.action)) throw new Error("Unsupported desktop action");
-      if (!payload.args || Array.isArray(payload.args) || typeof payload.args !== "object") throw new Error("Invalid action arguments");
-
-      const requestId = message.request_id;
-      const expiresAt = Date.now() + this.requestTtl;
-      this.requests.set(requestId, {status:"pending", expiresAt});
-      try {
-        const result = await this.client.execute(payload.action, payload.args);
-        this.requests.set(requestId, {status:"completed", expiresAt, result});
-        return {ok:true, request_id:requestId, result};
-      } catch (error) {
-        this.requests.set(requestId, {status:"failed", expiresAt, error:String(error?.message || error)});
-        throw error;
-      }
     }
 
     if (!this.owner || !this.client.session) throw new Error("No authorized desktop session");

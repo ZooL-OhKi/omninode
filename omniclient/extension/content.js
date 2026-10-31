@@ -17,8 +17,9 @@
   }
 
   function isSettled(response, stableForMs) {
-    const streaming = Boolean(response.closest('[aria-busy="true"], [data-is-streaming="true"]') || document.querySelector('button[data-test-id="stop-button"], button[aria-label="Stop response"], button[aria-label="Interrompi risposta"], button[aria-label="Stop generating"], button[aria-label="Interrompi generazione"]'));
-    if (streaming) return false;
+    const contextStreaming = Boolean(response.closest('[aria-busy="true"], [data-is-streaming="true"]'));
+    const pageStreaming = typeof document !== "undefined" && Boolean(document.querySelector('button[data-test-id="stop-button"], button[aria-label="Stop response"], button[aria-label="Interrompi risposta"], button[aria-label="Stop generating"], button[aria-label="Interrompi generazione"]'));
+    if (contextStreaming || pageStreaming) return false;
     const complete = response.getAttribute("aria-busy") === "false" || response.getAttribute("data-is-streaming") === "false";
     return complete && stableForMs >= 3000;
   }

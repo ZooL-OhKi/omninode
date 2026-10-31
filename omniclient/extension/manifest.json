@@ -1,9 +1,10 @@
 {
   "manifest_version": 3,
   "name": "OmniNode Bridge",
-  "version": "0.2.0",
-  "description": "Canale desktop nativo con consenso locale e gestione schede IA. Integrazione automatica chat ancora incompleta.",
+  "version": "0.2.1",
+  "description": "Canale desktop nativo con consenso locale, sessione autorizzata e gestione schede IA.",
   "permissions": ["activeTab", "tabs", "nativeMessaging"],
   "background": {"service_worker": "service_worker.js"},
-  "action": {"default_title": "OmniNode Desktop", "default_popup": "desktop.html"}
+  "action": {"default_title": "OmniNode Desktop", "default_popup": "desktop.html"},
+  "content_scripts": [{"matches": ["https://gemini.google.com/*"], "js": ["content.js"], "run_at": "document_idle"}]
 }

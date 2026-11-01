@@ -1,47 +1,41 @@
 # Stato corrente OmniNode
 
-Aggiornamento: 1 novembre 2026. Branch `feature/bridge-gemini-vertical`, HEAD `7ce0eb6c3a304b098d17e4ada5f8bb9cf6e90f0e`. PR #9 resta aperta; nessun merge o deploy implicito.
+Aggiornamento: 1 novembre 2026. Branch `feature/bridge-gemini-vertical`. Ultimo commit di codice pubblicato nella sessione: `400c02c7523d7fca9d50ea0513c6349bbda4163e`. Questo documento non certifica HEAD futuro, CI, merge o deploy.
 
 AGENTS.md e SECURITY.md restano normativi: mTLS/ACL, TLS 1.3, OpenRoot/O_EXCL, consenso, scadenza e STOP non vengono indeboliti.
 
-## Consegna automatica autorizzata
+## Correzione del percorso di consegna
 
-Il commit `7ce0eb6c3a304b098d17e4ada5f8bb9cf6e90f0e` aggiunge `DeliveryLedger.autoDeliver()` e il pulsante esplicito "Autorizza consegna automatica nel composer (inserimento + invio, un tentativo)".
+`7ce0eb6c3a304b098d17e4ada5f8bb9cf6e90f0e` introduceva un percorso automatico solo testuale. Non completava la consegna dello screenshot.
 
-La consegna automatica esegue al massimo un inserimento e un invio per `request_id`. Mantiene:
+`400c02c7523d7fca9d50ea0513c6349bbda4163e` modifica `omniclient/extension/text_delivery.js`: `autoDeliver()` richiede lo screenshot, inserisce il JSON e tenta una sola volta il paste del File. Non invia automaticamente il solo testo quando manca l'allegato. La preview deve essere unica, caricata e stabile per 3 secondi; il caricamento non stabilizzato entro 15 secondi termina in `ATTACHMENT_UNCERTAIN_HALT`. Una preview pronta o verificata che cambia termina nello stesso stato.
 
-- `DRAFT_PROTECTED_HOLD` se il composer contiene una bozza utente, allegati o upload;
-- verifica del composer prima e dopo l’autorizzazione locale;
-- single-flight tramite `busy`, `autoAttempted` e `sendAttempted`;
-- un solo tentativo di invio, senza retry;
-- `SEND_UNCERTAIN_HALT` su evidenza mancante, timeout, STOP o errore;
-- anti-loop: il risultato contiene `omninode_response: true` e `completed_action`, ma `parseRequest()` lo rifiuta come comando operativo.
+L'invio richiede la conferma locale esplicita dell'allegato. `verification=user-confirmed` non significa verifica crittografica o ricevuta del provider. Il paste sintetico resta un tentativo di compatibilita. Il codice ricontrolla sessione, composer e preview prima del click; mantiene `DRAFT_PROTECTED_HOLD`, `busy`, `autoAttempted`, `sendAttempted` e nessun retry di upload o invio incerto. Queste sono proprieta previste dal codice, non risultati appena collaudati.
 
-## Test locali eseguiti
+Il JSON contiene `omninode_response: true` e `completed_action`; il parser dei comandi accetta solo lo schema operativo esatto. Il percorso rimane limitato allo screenshot e non costituisce controllo desktop autonomo generale.
 
-Comando eseguito dall’utente in `A:\omninode-clean-20261101-011658`:
+## Rettifica delle evidenze di test
 
-```powershell
-node --test omniclient/extension/*.test.cjs
-```
+L'utente ha eseguito `node --test omniclient/extension/*.test.cjs` in `A:\omninode-clean-20261101-011658`, riportando 165 pass, 0 fail, 0 skipped e 216.6092 ms. Nell'output non compaiono i sei nuovi test di `auto-delivery.test.cjs`; non e stata fornita una verifica dello SHA locale. Questo output non valida la nuova patch automatica ne il commit `400c02c7`.
 
-Esito osservato:
+La precedente dichiarazione che i 165 test comprendessero i sei nuovi test era errata. Il file `auto-delivery.test.cjs` pubblicato con `7ce0eb6c` contiene inoltre fixture errate: manca la preparazione del record prima di diverse chiamate ad `autoDeliver()`, e il mock di invio non svuota il composer. Non e stato corretto in questa tranche, per richiesta dell'utente di non lavorare sui test.
 
-- 165 test pass;
-- 0 fail;
-- 0 skipped;
-- durata 216.6092 ms.
+Nessun test eseguito dall'assistente per `400c02c7`; nessun esito CI recente verificato. Nessuna certificazione di funzionamento finale.
 
-I test coprono bozze utente, modifiche concorrenti, sessioni scadute, duplicati, un solo inserimento/invio, timeout incerti, STOP, allegati, preview, anti-loop e rifiuto del JSON di risposta come nuovo comando.
+## Prove fisiche e limiti
 
-## Prove e limiti
+`e2e-image-006` resta il resoconto positivo storico del percorso assistito screenshot -> allegato Gemini -> lettura visiva, con conferma utente. Provenienza e limiti sono in `ZERO_CONTEXT_HANDOVER.md`; l'immagine originale non e versionata. Non ripetere gli ID storici come comandi live.
 
-`e2e-image-006` resta l’unica prova positiva nota del percorso screenshot -> allegato Gemini -> lettura visiva, con conferma utente. Non è una certificazione generale.
+Non e attestata l'installazione Windows del commit `400c02c7`, il reload dell'estensione o una nuova consegna nel composer. La schermata della sessione attiva non prova il successo dell'allegato. Nessun merge o aggiornamento Oracle effettuato.
 
-La consegna automatica è implementata e coperta dai test automatici, ma non è ancora stata eseguita una prova fisica nel composer Gemini dopo il reload dell’estensione. Non dichiarare `SENT_CONFIRMED` per una nuova sessione senza evidenza nuova e ID nuovo.
+Restano aperti STOP nativo/browser bidirezionale, race fisiche, persistenza/crash senza replay, Unicode/DPI/multi-monitor, hardening Go e collaborazione con una seconda chat reale.
 
-## Copie e allineamento
+## Copie e accesso operativo
 
-La copia `A:\omninode-clean-20261101-011658` ha eseguito con successo la suite estesa. Questo non certifica l’allineamento Git completo con `C:` o Drive, né ripara il precedente problema `desktop.ini` in `.git/refs`.
+Copia Windows storicamente attiva: `C:\Users\ugopl\omninode-github`. Copia usata per i 165 test: `A:\omninode-clean-20261101-011658`. Allineamento C:/A:/Drive e recupero del precedente `desktop.ini` in `.git/refs` non certificati. Preservare backup, stash e branch di recupero; nessun reset distruttivo, force push o sincronizzazione di `.git` tramite Drive.
 
-Non sincronizzare `.git` tramite Drive, non cancellare recuperi e non forzare il branch.
+Il connettore GitHub permette modifiche al repository, non l'esecuzione sul PC Windows. La ricerca degli strumenti disponibili non ha restituito un esecutore Windows o un canale desktop utilizzabile dall'assistente. Non chiedere approvazioni per azioni locali che non si possono eseguire e non dichiararle compiute.
+
+## Precedenza documentale
+
+Questa rettifica prevale sulle precedenti affermazioni di `NEXT_STEPS.md` che attribuiscono alla nuova consegna automatica la validazione dei 165 test. Il codice e pubblicato; installazione e funzionamento della nuova versione non sono dimostrati.

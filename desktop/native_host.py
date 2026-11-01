@@ -25,6 +25,8 @@ def main():
     first = initial_request(sys.stdin.buffer, sys.stdout.buffer)
     if first is None:
         return
+    from windows_input_backend import configure_dpi
+    configure_dpi()
     from desktop_control import DesktopSession, windows_backend
     import tkinter as tk
     from tkinter import messagebox

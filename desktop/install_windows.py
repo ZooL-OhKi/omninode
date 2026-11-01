@@ -8,12 +8,16 @@ import subprocess
 import sys
 import venv
 
+REQUIRED_SOURCE_FILES = ("native_host.py", "native_channel.py", "native_bootstrap.py",
+                         "desktop_control.py", "windows_input_backend.py",
+                         "screen_preview.py", "requirements-windows.txt")
+
 
 def checked_path(value):
     text = str(value)
     path = PureWindowsPath(text)
     if (not path.is_absolute() or path.drive.startswith("\\") or ".." in path.parts
-            or any(ord(c) < 32 or ord(c) > 126 or c in '"%!^&|<>' for c in text)):
+            or any(ord(c) < 32 or ord(c) > 126 or c in '\"%!^&|<>' for c in text)):
         raise ValueError("use an absolute local path without CMD metacharacters")
     return str(path)
 
@@ -45,6 +49,16 @@ def reject_links(path):
             raise ValueError("setup refuses linked or junction paths")
 
 
+def validate_source(source):
+    source = Path(source)
+    reject_links(source)
+    for name in REQUIRED_SOURCE_FILES:
+        file = source / name
+        reject_links(file)
+        if not file.is_file():
+            raise FileNotFoundError("native host dependency missing: " + name)
+
+
 def apply_plan(plan):
     if sys.platform != "win32":
         raise RuntimeError("installation supports Windows only")
@@ -52,14 +66,10 @@ def apply_plan(plan):
     base = Path(plan["base"])
     source = Path(plan["source"])
     reject_links(base)
-    reject_links(source)
-    if not (source / "native_host.py").is_file() or not (source / "requirements-windows.txt").is_file():
-        raise FileNotFoundError("native host source or requirements missing")
+    validate_source(source)
     identity = {key: plan[key] for key in ("source", "origin", "browser")}
     marker = base / "managed.json"
     reject_links(marker)
-    reject_links(source / "native_host.py")
-    reject_links(source / "requirements-windows.txt")
     if base.exists():
         if not marker.is_file() or json.loads(marker.read_text(encoding="utf-8")) != identity:
             raise FileExistsError("existing setup directory is not owned by this pairing")

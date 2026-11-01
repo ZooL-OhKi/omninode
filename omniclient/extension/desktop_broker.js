@@ -1,140 +1,104 @@
 "use strict";
-const OMNI_AI_SITES = Object.freeze({gemini:"https://gemini.google.com/", claude:"https://claude.ai/", perplexity:"https://www.perplexity.ai/"});
-const REQUEST_ID = /^[A-Za-z0-9._-]{8,128}$/;
-const ALLOWED_ACTIONS = Object.freeze(["screenshot"]);
-
-function omniConversation(raw) {
-  const url = new URL(raw);
-  if (url.protocol !== "https:" || url.username || url.password || url.port || !["gemini.google.com","claude.ai","perplexity.ai","www.perplexity.ai"].includes(url.hostname)) throw new Error("Select an authorized AI web chat tab");
-  return url.origin + url.pathname;
-}
-
+const OMNI_AI_SITES=Object.freeze({gemini:"https://gemini.google.com/",claude:"https://claude.ai/",perplexity:"https://www.perplexity.ai/"});
+class BridgeRejectedError extends Error {constructor(code){super(code);this.code=code;this.rejected=true;}}
+class BridgeFatalError extends Error {constructor(code){super(code);this.code=code;this.fatal=true;}}
+function omniConversation(raw){const u=new URL(raw);if(u.protocol!=="https:"||u.username||u.password||u.port||!["gemini.google.com","claude.ai","perplexity.ai","www.perplexity.ai"].includes(u.hostname))throw new BridgeRejectedError("INVALID_CONVERSATION");return u.origin+u.pathname;}
 class OmniDesktopBroker {
-  constructor(api, client, options = {}) {
-    this.api = api;
-    this.client = client;
-    this.owner = null;
-    this.epoch = 0;
-    this.helpers = new Set();
-    this.activationTtl = options.activationTtl ?? 600000;
-    this.requestTtl = options.requestTtl ?? 30000;
-    this.maxRequests = options.maxRequests ?? 20;
-    this.tokenFactory = options.tokenFactory ?? (() => {
-      const bytes = new Uint8Array(32);
-      globalThis.crypto.getRandomValues(bytes);
-      return Array.from(bytes, byte => byte.toString(16).padStart(2, "0")).join("");
-    });
-    this.activation = null;
-    this.requests = new Map();
+  constructor(api,client,options={}){
+    this.api=api;this.client=client;this.owner=null;this.session=null;this.activation=null;this.epoch=0;this.opening=false;this.helpers=new Set();this.requests=new Map();
+    this.activationTtl=options.activationTtl??600000;this.maxRequests=options.maxRequests??20;
+    this.tokenFactory=options.tokenFactory??(()=>{const b=new Uint8Array(32);globalThis.crypto.getRandomValues(b);return Array.from(b,x=>x.toString(16).padStart(2,"0")).join("");});
   }
-
-  trusted(sender) {
-    return sender?.id === this.api.runtime.id && sender.url === this.api.runtime.getURL("desktop.html") && !sender.tab;
+  trusted(s){return s?.id===this.api.runtime.id&&s.url===this.api.runtime.getURL("desktop.html")&&!s.tab;}
+  stop(){this.epoch++;if(this.session){this.session.state="STOPPED";clearTimeout(this.session.timer);}this.session=null;this.owner=null;this.activation=null;this.opening=false;this.requests=new Map();this.helpers.clear();this.client.stop();this.api.action.setBadgeText({text:""});}
+  changed(id,url){if(this.owner?.tabId!==id)return;try{if(omniConversation(url)===this.owner.conversation)return;}catch{}this.stop();}
+  isCurrent(s){if(!s||this.session!==s||s.epoch!==this.epoch||s.state!=="ACTIVE")return false;if(Date.now()>=s.expiresAt||this.client.session!==s.nativeSession){this.stop();return false;}return true;}
+  _assertActiveBridge(sender,m,bind=false){
+    if(sender?.id!==this.api.runtime.id)throw new BridgeRejectedError("WRONG_EXTENSION");
+    if(sender.frameId!==0)throw new BridgeRejectedError("NON_TOP_FRAME");
+    const s=this.session;
+    if(!s||sender.tab?.id!==s.tabId)throw new BridgeRejectedError("WRONG_TAB");
+    let url;try{url=omniConversation(sender.url);}catch{throw new BridgeRejectedError("WRONG_URL");}
+    if(url!==s.conversation)throw new BridgeRejectedError("WRONG_URL");
+    if(m.activation_id!==s.activationId)throw new BridgeRejectedError("INVALID_ACTIVATION");
+    if(!this.isCurrent(s))throw new BridgeRejectedError("SESSION_INACTIVE");
+    if(s.documentId!==null&&sender.documentId!==s.documentId)throw new BridgeRejectedError("WRONG_DOCUMENT");
+    if(!bind&&!s.bound)throw new BridgeRejectedError("DOCUMENT_NOT_BOUND");
+    if(!bind&&m.stream_state!=="settled")throw new BridgeRejectedError("NOT_SETTLED");
+    if(!bind&&s.inFlightRequestId!==null)throw new BridgeRejectedError("BRIDGE_BUSY");
+    return s;
   }
-
-  stop() {
-    this.epoch++;
-    this.owner = null;
-    this.helpers.clear();
-    this.activation = null;
-    this.requests.clear();
-    this.client.stop();
-    this.api.action.setBadgeText({text:""});
+  async bridge(m,sender){
+    const s=this._assertActiveBridge(sender,m,m.type==="bridge-bind");
+    if(m.type==="bridge-bind"){if(!s.bound){s.documentId=typeof sender.documentId==="string"?sender.documentId:null;s.bound=true;}return {ok:true,activation_id:s.activationId};}
+    if(typeof m.request_id!=="string"||!/^[A-Za-z0-9._-]{8,128}$/.test(m.request_id))throw new BridgeRejectedError("INVALID_REQUEST_ID");
+    if(s.requests.has(m.request_id))throw new BridgeRejectedError("DUPLICATE_REQUEST");
+    if(s.requests.size>=this.maxRequests)throw new BridgeRejectedError("REQUEST_LIMIT");
+    if(!Number.isSafeInteger(m.issued_at)||m.issued_at<s.issuedAt||m.issued_at>Date.now()+5000)throw new BridgeRejectedError("INVALID_TIMESTAMP");
+    const p=m.payload;
+    if(!p||Object.keys(p).sort().join(",")!=="action,args"||p.action!=="screenshot"||!p.args||Array.isArray(p.args)||typeof p.args!=="object"||Object.keys(p.args).length)throw new BridgeRejectedError("INVALID_PAYLOAD");
+    s.inFlightRequestId=m.request_id;s.requests.set(m.request_id,{status:"pending"});
+    try{
+      const tab=await this.api.tabs.get(s.tabId);
+      if(!this.isCurrent(s))return {stale_dropped:true};
+      if(omniConversation(tab.url)!==s.conversation){this.stop();return {stale_dropped:true};}
+      const result=await this.client.execute(p.action,p.args);
+      if(!this.isCurrent(s))return {stale_dropped:true};
+      s.requests.set(m.request_id,{status:"completed"});
+      return {ok:true,request_id:m.request_id,activation_id:s.activationId,result,_session:s};
+    }catch(error){if(this.session!==s||this.epoch!==s.epoch||Date.now()>=s.expiresAt){if(this.session===s)this.stop();return {stale_dropped:true};}this.stop();throw new BridgeFatalError("NATIVE_EXECUTION_FAILED");}
+    finally{if(this.session===s)s.inFlightRequestId=null;}
   }
-
-  changed(tabId, url) {
-    if (this.owner?.tabId !== tabId) return;
-    try { if (omniConversation(url) === this.owner.conversation) return; } catch {}
-    this.stop();
-  }
-
-  _assertActiveBridge(sender, message) {
-    if (!this.owner || !this.client.session || !this.activation) throw new Error("No authorized desktop session");
-    if (Date.now() > this.activation.expiresAt) { this.stop(); throw new Error("Authorized session expired"); }
-    if (sender?.tab?.id !== this.owner.tabId) throw new Error("Request is not from the authorized conversation tab");
-    if (message?.activation_id !== this.activation.token) throw new Error("Invalid bridge activation token");
-    return this.activation;
-  }
-
-  async _assertCurrentConversation() {
-    const current = await this.api.tabs.get(this.owner.tabId);
-    if (omniConversation(current.url) !== this.owner.conversation) { this.stop(); throw new Error("Controller conversation changed"); }
-    return current;
-  }
-
-  async handle(message, sender) {
-    if (message?.type === "ai-bridge-request") {
-      const activation = this._assertActiveBridge(sender, message);
-      await this._assertCurrentConversation();
-      if (typeof message.request_id !== "string" || !REQUEST_ID.test(message.request_id)) throw new Error("Invalid request_id");
-      if (this.requests.has(message.request_id)) throw new Error("Duplicate request_id; request not re-executed");
-      if (this.requests.size >= this.maxRequests) { this.stop(); throw new Error("Request limit reached; session stopped"); }
-      if (!Number.isSafeInteger(message.issued_at) || message.issued_at < activation.issuedAt - 1000 || message.issued_at > Date.now() + 5000) throw new Error("Invalid request timestamp");
-      if (message.stream_state !== "settled") throw new Error("Response is not settled; refusing request");
-      const payload = message.payload;
-      if (!payload || Array.isArray(payload) || typeof payload !== "object") throw new Error("Invalid bridge payload");
-      if (Object.keys(payload).sort().join(",") !== "action,args") throw new Error("Invalid bridge payload schema");
-      if (typeof payload.action !== "string" || !ALLOWED_ACTIONS.includes(payload.action)) throw new Error("Unsupported desktop action");
-      if (!payload.args || Array.isArray(payload.args) || typeof payload.args !== "object") throw new Error("Invalid action arguments");
-
-      const requestId = message.request_id;
-      const expiresAt = Date.now() + this.requestTtl;
-      this.requests.set(requestId, {status:"pending", expiresAt});
-      try {
-        const result = await this.client.execute(payload.action, payload.args);
-        this.requests.set(requestId, {status:"completed", expiresAt, result});
-        return {ok:true, request_id:requestId, result};
-      } catch (error) {
-        this.requests.set(requestId, {status:"failed", expiresAt, error:String(error?.message || error)});
-        throw error;
-      }
-    }
-
-    if (!this.trusted(sender)) throw new Error("Untrusted desktop caller");
-    if (message.type === "desktop-stop") { this.stop(); return {ok:true}; }
-    if (message.type === "desktop-status") return {ok:true, active:Boolean(this.owner && this.client.session), conversation:this.owner?.conversation || null};
-
-    if (message.type === "desktop-open") {
-      if (this.owner) throw new Error("Stop the existing session first");
-      if (!Number.isInteger(message.tabId)) throw new Error("Invalid selected tab");
-      const epoch = this.epoch;
-      const tab = await this.api.tabs.get(message.tabId);
-      if (epoch !== this.epoch) throw new Error("Activation cancelled");
-      if (!tab.active) throw new Error("Select the controller tab before activation");
-      const conversation = omniConversation(tab.url);
-      this.owner = {tabId:tab.id, windowId:tab.windowId, conversation};
-      try {
+  async handle(m,sender){
+    if(["bridge-bind","ai-bridge-request"].includes(m?.type))return this.bridge(m,sender);
+    if(!this.trusted(sender))throw new BridgeRejectedError("UNTRUSTED_POPUP");
+    if(m.type==="desktop-stop"){this.stop();return {ok:true};}
+    if(m.type==="desktop-status")return {ok:true,active:this.isCurrent(this.session),conversation:this.owner?.conversation??null};
+    if(m.type==="desktop-open"){
+      if(this.owner||this.opening)throw new BridgeRejectedError("SESSION_ALREADY_OPEN");
+      if(!Number.isInteger(m.tabId))throw new BridgeRejectedError("INVALID_TAB");
+      this.opening=true;const epoch=this.epoch;
+      try{
+        const tab=await this.api.tabs.get(m.tabId);
+        if(epoch!==this.epoch)throw new BridgeRejectedError("ACTIVATION_CANCELLED");
+        if(!tab.active)throw new BridgeRejectedError("TAB_NOT_ACTIVE");
+        const conversation=omniConversation(tab.url);this.owner={tabId:tab.id,windowId:tab.windowId,conversation};
         await this.client.open(conversation);
-        const current = await this.api.tabs.get(tab.id);
-        if (epoch !== this.epoch || omniConversation(current.url) !== conversation) throw new Error("Conversation changed during consent");
-        const issuedAt = Date.now();
-        const expiresAt = issuedAt + this.activationTtl;
-        const activationId = this.tokenFactory();
-        this.activation = {token:activationId, issuedAt, expiresAt};
-        await this.api.tabs.sendMessage(tab.id, {type:"omninode-activation", activation_id:activationId, conversation, expires_at:expiresAt});
-        if (epoch !== this.epoch) throw new Error("Activation cancelled");
-        this.api.action.setBadgeText({text:"ON"});
-        return {ok:true, conversation, expires_at:expiresAt};
-      } catch (error) { this.stop(); throw error; }
+        if(epoch!==this.epoch)throw new BridgeRejectedError("ACTIVATION_CANCELLED");
+        const current=await this.api.tabs.get(tab.id);
+        if(epoch!==this.epoch)throw new BridgeRejectedError("ACTIVATION_CANCELLED");
+        if(omniConversation(current.url)!==conversation)throw new BridgeRejectedError("CONVERSATION_CHANGED");
+        const issuedAt=Date.now(),activationId=this.tokenFactory(),expiresAt=issuedAt+this.activationTtl;
+        const s={...this.owner,state:"ACTIVE",epoch,activationId,issuedAt,expiresAt,nativeSession:this.client.session,documentId:null,bound:false,inFlightRequestId:null,requests:new Map()};
+        this.session=s;this.requests=s.requests;this.activation={token:activationId,issuedAt,expiresAt};
+        s.timer=setTimeout(()=>{if(this.session===s)this.stop();},this.activationTtl);s.timer.unref?.();
+        const ack=await this.api.tabs.sendMessage(tab.id,{type:"omninode-activation",activation_id:activationId,conversation,expires_at:expiresAt},{frameId:0});
+        if(!this.isCurrent(s)||ack?.ok!==true)throw new BridgeRejectedError("ACTIVATION_CANCELLED");
+        this.api.action.setBadgeText({text:"ON"});return {ok:true,conversation,expires_at:expiresAt};
+      }catch(error){if(this.epoch===epoch)this.stop();throw error;}
+      finally{if(this.epoch===epoch)this.opening=false;}
     }
-
-    if (!this.owner || !this.client.session) throw new Error("No authorized desktop session");
-    await this._assertCurrentConversation();
-    if (message.type === "desktop-execute") return this.client.execute(message.action, message.args);
-    if (message.type === "ai-open") {
-      if (!Object.hasOwn(OMNI_AI_SITES, message.provider)) throw new Error("Unsupported AI provider");
-      const tab = await this.api.tabs.create({windowId:this.owner.windowId, url:OMNI_AI_SITES[message.provider], active:true});
-      this.helpers.add(tab.id);
-      return {ok:true, tabId:tab.id};
+    const s=this.session;if(!this.isCurrent(s))throw new BridgeRejectedError("SESSION_INACTIVE");
+    const current=await this.api.tabs.get(s.tabId);
+    if(!this.isCurrent(s))return {stale_dropped:true};
+    if(omniConversation(current.url)!==s.conversation){this.stop();return {stale_dropped:true};}
+    if(m.type==="desktop-execute"){
+      if(s.inFlightRequestId!==null)throw new BridgeRejectedError("BRIDGE_BUSY");s.inFlightRequestId="popup";
+      try{const result=await this.client.execute(m.action,m.args);return this.isCurrent(s)?result:{stale_dropped:true};}
+      catch(error){if(!this.isCurrent(s))return {stale_dropped:true};this.stop();throw new BridgeFatalError("NATIVE_EXECUTION_FAILED");}
+      finally{if(this.session===s)s.inFlightRequestId=null;}
     }
-    if (message.type === "ai-focus") {
-      if (message.tabId !== this.owner.tabId && !this.helpers.has(message.tabId)) throw new Error("Tab not owned by this session");
-      await this.api.tabs.update(message.tabId, {active:true});
-      return {ok:true};
+    if(m.type==="ai-open"){
+      if(!Object.hasOwn(OMNI_AI_SITES,m.provider))throw new BridgeRejectedError("UNSUPPORTED_PROVIDER");
+      const tab=await this.api.tabs.create({windowId:s.windowId,url:OMNI_AI_SITES[m.provider],active:true});
+      if(!this.isCurrent(s))return {stale_dropped:true};this.helpers.add(tab.id);return {ok:true,tabId:tab.id};
     }
-    throw new Error("Unsupported desktop message");
+    if(m.type==="ai-focus"){
+      if(m.tabId!==s.tabId&&!this.helpers.has(m.tabId))throw new BridgeRejectedError("UNOWNED_TAB");
+      await this.api.tabs.update(m.tabId,{active:true});return this.isCurrent(s)?{ok:true}:{stale_dropped:true};
+    }
+    throw new BridgeRejectedError("UNSUPPORTED_MESSAGE");
   }
 }
-
-if (typeof module !== "undefined" && module.exports) module.exports = {OmniDesktopBroker, omniConversation};
-else globalThis.OmniDesktopBroker = OmniDesktopBroker;
+if(typeof module!=="undefined"&&module.exports)module.exports={OmniDesktopBroker,omniConversation,BridgeRejectedError,BridgeFatalError};
+else Object.assign(globalThis,{OmniDesktopBroker,BridgeRejectedError,BridgeFatalError});

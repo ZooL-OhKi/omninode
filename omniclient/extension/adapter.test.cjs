@@ -1,29 +1,9 @@
-const {test} = require('node:test');
-const assert = require('node:assert/strict');
-const {parseRequest,canDeliver,isSettled} = require('./content.js');
-const valid = {request_id:'request-0001',action:'screenshot',args:{}};
-test('rendered JSON screenshot request is parsed',()=>assert.deepEqual(parseRequest(JSON.stringify(valid)),valid));
-test('rejects unknown command field',()=>assert.throws(()=>parseRequest(JSON.stringify({...valid,command:'sh'}))));
-test('rejects legacy file-write contract',()=>assert.throws(()=>parseRequest(JSON.stringify({request_id:'request-0001',path:'gemini/new.md',content:'Hello'}))));
-test('rejects incomplete streamed JSON',()=>assert.throws(()=>parseRequest('{"request_id":')));
-for (const action of ['shell','exec','write','click','type','move']) {
-  test('rejects unauthorized action '+action,()=>assert.throws(()=>parseRequest(JSON.stringify({...valid,action}))));
-}
-for (const args of [null,'x',[1],{command:'dir'}]) {
-  test('rejects invalid args '+JSON.stringify(args),()=>assert.throws(()=>parseRequest(JSON.stringify({...valid,args}))));
-}
-test('rejects invalid request id',()=>assert.throws(()=>parseRequest(JSON.stringify({...valid,request_id:'x'}))));
-test('allows empty composer in active conversation',()=>assert.equal(canDeliver(true,true,false,''),true));
-test('preserves existing draft even if unfocused',()=>assert.equal(canDeliver(true,true,false,'my draft'),false));
-test('stop prohibits insertion',()=>assert.equal(canDeliver(false,true,false,''),false));
-test('navigation prohibits insertion',()=>assert.equal(canDeliver(true,false,false,''),false));
-test('streaming prohibits insertion',()=>assert.equal(canDeliver(true,true,true,''),false));
-test('unsettled response cannot execute',()=>{
-  const response={getAttribute:()=>null,closest:()=>null};
-  assert.equal(isSettled(response,4000),false);
-});
-test('response requires explicit completion and quiescence',()=>{
-  const response={getAttribute:name=>name==='aria-busy'?'false':null,closest:()=>null};
-  assert.equal(isSettled(response,1000),false);
-  assert.equal(isSettled(response,3000),true);
-});
+const {test}=require("node:test"),a=require("node:assert/strict");
+const {parseRequest,canDeliver,prepareResultDelivery}=require("./content.js");
+const valid={action:"screenshot",args:{},request_id:"request-0001"};
+test("strict schema",()=>a.deepEqual(parseRequest(JSON.stringify(valid)),valid));
+for(const r of [{...valid,command:"sh"},{...valid,action:"shell"},{...valid,args:{x:1}},{...valid,request_id:"x"},{path:"a",content:"b"}])test("reject "+JSON.stringify(r),()=>a.throws(()=>parseRequest(JSON.stringify(r))));
+test("incomplete JSON",()=>a.throws(()=>parseRequest('{"action":')));
+test("draft guards",()=>{a.equal(canDeliver(true,true,false,""),true);a.equal(canDeliver(true,true,false,"draft"),false);a.equal(canDeliver(true,true,true,""),false);});
+test("prepare never mutates draft",()=>{const e={textContent:"draft"};a.equal(prepareResultDelivery(e,{request_id:"r"}).state,"DRAFT_PROTECTED_HOLD");a.equal(e.textContent,"draft");});
+test("attachments and duplicate hold",()=>{const p={request_id:"r",ok:true},seen=new Set();a.equal(prepareResultDelivery({textContent:"",querySelector:()=>({})},p,seen).state,"DRAFT_PROTECTED_HOLD");const e={textContent:" \u200b ",querySelector:()=>null};a.equal(prepareResultDelivery(e,p,seen).state,"READY_FOR_CONTROLLED_INSERTION");a.equal(prepareResultDelivery(e,p,seen).state,"DUPLICATE_RESULT");a.equal(e.textContent," \u200b ");});

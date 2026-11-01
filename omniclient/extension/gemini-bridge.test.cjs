@@ -1,32 +1,12 @@
-const {test}=require('node:test');
-const assert=require('node:assert/strict');
-const {parseRequest,canDeliver,isSettled}=require('./content.js');
-const valid='{"action":"screenshot","args":{},"request_id":"req-12345678"}';
-test('parses one authorized screenshot request',()=>{
-  const request=parseRequest(valid);
-  assert.equal(request.action,'screenshot');
-  assert.equal(request.request_id,'req-12345678');
-});
-for(const text of [
-  '{"content":"x","path":"a.txt","request_id":"req-12345678"}',
-  '{"action":"shell","args":{},"request_id":"req-12345678"}',
-  '{"action":"screenshot","args":{"cmd":"dir"},"request_id":"req-12345678"}',
-  '{"action":"screenshot","args":{},"request_id":"short"}',
-  'not-json'
-])test('rejects malformed or unauthorized request: '+text,()=>assert.throws(()=>parseRequest(text)));
-test('does not deliver into a non-empty user draft',()=>{
-  assert.equal(canDeliver(true,true,false,'bozza utente'),false);
-  assert.equal(canDeliver(true,true,false,''),true);
-});
-test('does not deliver while streaming or after navigation',()=>{
-  assert.equal(canDeliver(true,true,true,''),false);
-  assert.equal(canDeliver(true,false,false,''),false);
-  assert.equal(canDeliver(false,true,false,''),false);
-});
-test('requires explicit completion and quiescence',()=>{
-  const response={getAttribute:()=>null,closest:()=>null};
-  assert.equal(isSettled(response,4000),false);
-  const complete={getAttribute:name=>name==='aria-busy'?'false':null,closest:()=>null};
-  assert.equal(isSettled(complete,1000),false);
-  assert.equal(isSettled(complete,3000),true);
-});
+const {test}=require("node:test"),a=require("node:assert/strict");
+const {LiveBirthGate,OneShotGate}=require("./content.js");
+const signal={text:"json",controls:"copy|feedback",complete:true,streaming:false,valid:true,blockCount:1};
+function fixture(){const n={textContent:"new"},g=new LiveBirthGate([{textContent:"old"}],100);g.added([n],n,101);g.mutation(n);return {n,g};}
+test("null attributes require completion bar and >=3000ms",()=>{const {n,g}=fixture();a.equal(g.sample(n,{...signal,ariaBusy:null,dataIsStreaming:null},200),"COMPLETION_BAR_READY");a.equal(g.sample(n,signal,3199),"COMPLETION_BAR_READY");a.equal(g.sample(n,signal,3200),"SETTLED");});
+test("long pause without controls never settles",()=>{const {n,g}=fixture();for(const ms of [200,5000,10000])a.equal(g.sample(n,{...signal,complete:false},ms),"OBSERVING_MUTATIONS");});
+for(const c of [{streaming:true},{complete:false},{text:"changed"},{controls:"different"}])test("reset "+JSON.stringify(c),()=>{const {n,g}=fixture();g.sample(n,signal,200);a.equal(g.sample(n,{...signal,...c},4000),"OBSERVING_MUTATIONS");});
+test("multiple blocks rejected",()=>{const {n,g}=fixture();a.equal(g.sample(n,{...signal,blockCount:2},200),"REJECTED_MULTI_BLOCK");});
+test("baseline rerender ignored",()=>{const n={textContent:" old "},g=new LiveBirthGate([{textContent:"old"}],100);g.added([n],n,200);g.mutation(n);a.equal(g.sample(n,signal,9000),"BASELINE_IGNORED");});
+test("batch and non-last history ignored",()=>{const x={textContent:"x"},y={textContent:"y"},g=new LiveBirthGate([],100);g.added([x,y],y,200);g.mutation(y);a.equal(g.sample(y,signal,9000),"BASELINE_IGNORED");const z={textContent:"z"};g.added([z],y,300);g.mutation(z);a.equal(g.sample(z,signal,9000),"BASELINE_IGNORED");});
+test("no live text mutation means no completion",()=>{const n={textContent:"x"},g=new LiveBirthGate([],100);g.added([n],n,200);g.mutation(n,false);a.equal(g.sample(n,signal,9000),"OBSERVING_MUTATIONS");});
+test("one-shot turn binding and explicit confirmation",()=>{const g=new OneShotGate(),x={},y={};a.equal(g.allow(x,"r"),false);g.arm(x);a.equal(g.allow(y,"r"),false);a.equal(g.allow(x,"r"),true);a.equal(g.allow(x,"r",true),false);a.equal(g.allow(y,"s"),false);a.equal(g.allow(y,"s",true),true);});

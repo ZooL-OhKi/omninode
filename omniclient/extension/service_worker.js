@@ -1,28 +1,25 @@
 "use strict";
-importScripts("native_client.js", "desktop_broker.js", "bridge_result.js");
-const desktopBroker = new OmniDesktopBroker(chrome, new OmniNativeClient(chrome.runtime));
-const MESSAGE_TYPES = ["desktop-open","desktop-stop","desktop-status","desktop-execute","ai-open","ai-focus","ai-bridge-request"];
-chrome.runtime.onMessage.addListener((message, sender, reply) => {
-  if (message?.type === "omninode-execute") {
-    reply({ok:false, error:"Legacy HTTP execution disabled pending session/origin hardening"});
-    return false;
-  }
-  if (!message || !MESSAGE_TYPES.includes(message.type)) return false;
-  const epoch = desktopBroker.epoch;
-  desktopBroker.handle(message, sender).then(result => {
-    if (message.type !== "ai-bridge-request") { reply(result); return; }
-    if (desktopBroker.epoch !== epoch || !desktopBroker.owner || !desktopBroker.client.session || Date.now() > desktopBroker.activation?.expiresAt) throw Error("Bridge session revoked before result delivery");
-    reply({ok:true, request_id:message.request_id, result:normalizeBridgeScreenshot(result.result)});
-  }).catch(error => {
-    if (message.type === "ai-bridge-request" && desktopBroker.epoch === epoch) desktopBroker.stop();
-    reply({ok:false, ...(message.type === "ai-bridge-request" ? {request_id:message.request_id} : {}), error:String(error.message || error)});
-  });
-  return true;
-});
-chrome.tabs.onRemoved.addListener(tabId => {
-  if (desktopBroker.owner?.tabId === tabId) desktopBroker.stop();
-  desktopBroker.helpers.delete(tabId);
-});
-chrome.tabs.onUpdated.addListener((tabId, change) => {
-  if (change.url) desktopBroker.changed(tabId, change.url);
-});
+function createBridgeListener(broker,normalize){
+  return (message,sender,reply)=>{
+    if(message?.type==="omninode-execute"){reply({ok:false,rejected:true,code:"LEGACY_DISABLED"});return false;}
+    if(!["bridge-bind","ai-bridge-request","desktop-open","desktop-stop","desktop-status","desktop-execute","ai-open","ai-focus"].includes(message?.type))return false;
+    broker.handle(message,sender).then(value=>{
+      if(value?.stale_dropped){reply();return;}
+      if(message.type!=="ai-bridge-request"){reply(value);return;}
+      if(!broker.isCurrent(value._session)){reply();return;}
+      let result;
+      try{result=normalize(value.result);}catch{if(broker.isCurrent(value._session))broker.stop();reply({ok:false,fatal:true,code:"INVALID_NATIVE_IMAGE",request_id:message.request_id,activation_id:value.activation_id});return;}
+      if(!broker.isCurrent(value._session)){reply();return;}
+      reply({ok:true,request_id:value.request_id,activation_id:value.activation_id,result});
+    }).catch(error=>reply({ok:false,...(error.rejected?{rejected:true}:{fatal:true}),code:error.code||"INTERNAL_ERROR",...(message.type==="ai-bridge-request"?{request_id:message.request_id,activation_id:message.activation_id}:{})}));
+    return true;
+  };
+}
+if(typeof module!=="undefined"&&module.exports)module.exports={createBridgeListener};
+else{
+  importScripts("native_client.js","desktop_broker.js","bridge_result.js");
+  const broker=new OmniDesktopBroker(chrome,new OmniNativeClient(chrome.runtime));
+  chrome.runtime.onMessage.addListener(createBridgeListener(broker,normalizeBridgeScreenshot));
+  chrome.tabs.onRemoved.addListener(id=>{if(broker.owner?.tabId===id)broker.stop();broker.helpers.delete(id);});
+  chrome.tabs.onUpdated.addListener((id,c)=>{if(c.status==="loading"&&broker.owner?.tabId===id)broker.stop();else if(c.url)broker.changed(id,c.url);});
+}

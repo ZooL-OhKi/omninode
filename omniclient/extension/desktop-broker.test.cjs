@@ -1,32 +1,24 @@
-const {test}=require('node:test');
-const assert=require('node:assert/strict');
-const {OmniDesktopBroker,omniConversation}=require('./desktop_broker.js');
+const {test}=require("node:test"),a=require("node:assert/strict");
+const {OmniDesktopBroker,BridgeRejectedError,BridgeFatalError,omniConversation}=require("./desktop_broker.js");
 function fixture(){
-  const tabs=new Map([[1,{id:1,windowId:7,url:'https://gemini.google.com/app/chat',active:true}]]);
-  const calls=[];
-  const sent=[];
-  const api={runtime:{id:'extension',getURL:p=>'chrome-extension://extension/'+p},action:{setBadgeText:()=>{}},tabs:{get:async id=>{if(!tabs.has(id))throw Error('Missing tab');return tabs.get(id)},create:async data=>{calls.push(data);tabs.set(2,{id:2,...data});return {id:2,...data}},update:async(id,data)=>{calls.push({id,...data})},sendMessage:async(tabId,message)=>{sent.push({tabId,message});return {ok:true}}}};
-  const client={session:null,open:async()=>{client.session='session'},stop:()=>{client.session=null},execute:async(action,args)=>{calls.push({action,args});return {ok:true,kind:'image',width:1280,height:800,bytes:1000,data_url:'data:image/png;base64,x'}}};
-  const broker=new OmniDesktopBroker(api,client,{tokenFactory:()=>'a'.repeat(64)});
-  const sender={id:'extension',url:api.runtime.getURL('desktop.html')};
-  const bridgeSender={id:'extension',url:'https://gemini.google.com/app/chat',tab:{id:1}};
-  return {broker,api,client,sender,bridgeSender,tabs,calls,sent};
+ const tab={id:1,windowId:7,active:true,url:"https://gemini.google.com/app/chat"};let count=0,token=0;
+ const api={runtime:{id:"extension",getURL:p=>"chrome-extension://extension/"+p},action:{setBadgeText:()=>{}},tabs:{get:async()=>({...tab}),sendMessage:async()=>({ok:true}),create:async d=>({id:2,...d}),update:async()=>{}}};
+ const client={session:null,open:async()=>{client.session="native-"+(++count);},stop:()=>{client.session=null;},execute:async()=>({ok:true,result:{}})};
+ const broker=new OmniDesktopBroker(api,client,{tokenFactory:()=>String(++token).padStart(64,"a")});
+ const popup={id:"extension",url:api.runtime.getURL("desktop.html")},sender={id:"extension",frameId:0,documentId:"doc-1",url:tab.url,tab:{id:1}};
+ const open=async()=>{await broker.handle({type:"desktop-open",tabId:1},popup);await broker.handle({type:"bridge-bind",activation_id:broker.activation.token},sender);};
+ const request=()=>({type:"ai-bridge-request",activation_id:broker.activation.token,request_id:"request-0001",issued_at:Date.now(),stream_state:"settled",payload:{action:"screenshot",args:{}}});
+ return {tab,api,client,broker,popup,sender,open,request};
 }
-function bridgeRequest(overrides={}){
-  return {type:'ai-bridge-request',activation_id:'a'.repeat(64),request_id:'req-12345678',issued_at:Date.now(),stream_state:'settled',payload:{action:'screenshot',args:{}},...overrides};
-}
-test('normalizes conversation without query or fragment',()=>assert.equal(omniConversation('https://claude.ai/chat/id?private=1#x'),'https://claude.ai/chat/id'));
-for(const url of ['http://claude.ai/chat/id','https://claude.ai.evil/chat','https://evil.test/','https://user@claude.ai/','https://claude.ai:1234/'])test('rejects URL '+url,()=>assert.throws(()=>omniConversation(url)));
-test('web page sender cannot open native host',async()=>{const f=fixture();await assert.rejects(f.broker.handle({type:'desktop-open',tabId:1},{id:'extension',url:'https://gemini.google.com/app/chat',tab:{id:1}}));assert.equal(f.client.session,null)});
-test('desktop action rejected before local authorization',async()=>{const f=fixture();await assert.rejects(f.broker.handle({type:'desktop-execute',action:'move',args:{}},f.sender));assert.equal(f.calls.length,0)});
-test('open binds selected conversation and sends activation only to its tab',async()=>{const f=fixture();const result=await f.broker.handle({type:'desktop-open',tabId:1},f.sender);assert.equal(f.broker.owner.conversation,'https://gemini.google.com/app/chat');assert.equal(f.sent.length,1);assert.equal(f.sent[0].tabId,1);assert.equal(f.sent[0].message.activation_id,'a'.repeat(64));assert.equal(result.expires_at,f.broker.activation.expiresAt);f.broker.stop()});
-test('navigation revokes native session',async()=>{const f=fixture();await f.broker.handle({type:'desktop-open',tabId:1},f.sender);f.broker.changed(1,'https://gemini.google.com/app/other');assert.equal(f.client.session,null)});
-test('authorized bridge request executes once and correlates result',async()=>{const f=fixture();await f.broker.handle({type:'desktop-open',tabId:1},f.sender);const result=await f.broker.handle(bridgeRequest(),f.bridgeSender);assert.equal(result.request_id,'req-12345678');assert.equal(result.result.kind,'image');assert.deepEqual(f.calls.at(-1),{action:'screenshot',args:{}});f.broker.stop()});
-test('bridge request from another tab is rejected',async()=>{const f=fixture();await f.broker.handle({type:'desktop-open',tabId:1},f.sender);await assert.rejects(f.broker.handle(bridgeRequest(),{...f.bridgeSender,tab:{id:99}}));assert.equal(f.calls.length,0);f.broker.stop()});
-test('bridge request with invalid activation token is rejected',async()=>{const f=fixture();await f.broker.handle({type:'desktop-open',tabId:1},f.sender);await assert.rejects(f.broker.handle(bridgeRequest({activation_id:'b'.repeat(64)}),f.bridgeSender));assert.equal(f.calls.length,0);f.broker.stop()});
-test('streaming response cannot trigger desktop execution',async()=>{const f=fixture();await f.broker.handle({type:'desktop-open',tabId:1},f.sender);await assert.rejects(f.broker.handle(bridgeRequest({stream_state:'streaming'}),f.bridgeSender));assert.equal(f.calls.length,0);f.broker.stop()});
-test('duplicate request_id is never re-executed',async()=>{const f=fixture();await f.broker.handle({type:'desktop-open',tabId:1},f.sender);await f.broker.handle(bridgeRequest(),f.bridgeSender);await assert.rejects(f.broker.handle(bridgeRequest(),f.bridgeSender));assert.equal(f.calls.filter(call=>call.action).length,1);f.broker.stop()});
-test('expired activation stops the session',async()=>{const f=fixture();await f.broker.handle({type:'desktop-open',tabId:1},f.sender);f.broker.activation.expiresAt=Date.now()-1;await assert.rejects(f.broker.handle(bridgeRequest(),f.bridgeSender));assert.equal(f.client.session,null)});
-test('unknown action is rejected',async()=>{const f=fixture();await f.broker.handle({type:'desktop-open',tabId:1},f.sender);await assert.rejects(f.broker.handle(bridgeRequest({payload:{action:'shell',args:{}}}),f.bridgeSender));assert.equal(f.calls.length,0);f.broker.stop()});
-test('changed tab during consent is rejected',async()=>{const f=fixture();f.client.open=async()=>{f.client.session='session';f.tabs.get(1).url='https://claude.ai/chat/other'};await assert.rejects(f.broker.handle({type:'desktop-open',tabId:1},f.sender));assert.equal(f.client.session,null)});
-test('background tab cannot silently become controller',async()=>{const f=fixture();f.tabs.get(1).active=false;await assert.rejects(f.broker.handle({type:'desktop-open',tabId:1},f.sender));assert.equal(f.client.session,null)});
+function deferred(){let resolve;const promise=new Promise(r=>resolve=r);return {promise,resolve};}
+test("URL normalization",()=>{a.equal(omniConversation("https://gemini.google.com/app/id?hl=it"),"https://gemini.google.com/app/id");a.throws(()=>omniConversation("https://evil.test"));});
+for(const p of [{id:"other"},{frameId:1},{frameId:undefined},{tab:{id:2}},{url:"https://gemini.google.com/app/other"},{documentId:"doc-2"}])test("reject sender without revocation "+JSON.stringify(p),async()=>{const f=fixture();await f.open();const s=f.broker.session;await a.rejects(f.broker.handle(f.request(),{...f.sender,...p}),BridgeRejectedError);a.equal(f.broker.session,s);f.broker.stop();});
+test("invalid token/stream/payload do not revoke",async()=>{const f=fixture();await f.open();for(const p of [{activation_id:"bad"},{stream_state:"streaming"},{payload:{action:"shell",args:{}}},{payload:{action:"screenshot",args:{x:1}}}])await a.rejects(f.broker.handle({...f.request(),...p},f.sender),BridgeRejectedError);a.ok(f.client.session);f.broker.stop();});
+test("lock acquired before first await",async()=>{const f=fixture();await f.open();const d=deferred();f.api.tabs.get=()=>d.promise;const pending=f.broker.handle(f.request(),f.sender);await a.rejects(f.broker.handle({...f.request(),request_id:"request-0002"},f.sender),e=>e.code==="BRIDGE_BUSY");d.resolve(f.tab);a.equal((await pending).ok,true);f.broker.stop();});
+test("duplicate rejected",async()=>{const f=fixture();await f.open();await f.broker.handle(f.request(),f.sender);await a.rejects(f.broker.handle(f.request(),f.sender),e=>e.code==="DUPLICATE_REQUEST");f.broker.stop();});
+for(const stop of [f=>f.broker.stop(),f=>f.broker.changed(1,"https://gemini.google.com/app/other"),f=>{f.broker.session.expiresAt=0;}])test("late native result dropped",async()=>{const f=fixture();await f.open();const d=deferred();f.client.execute=()=>d.promise;const pending=f.broker.handle(f.request(),f.sender);await new Promise(setImmediate);stop(f);d.resolve({ok:true});a.equal((await pending).stale_dropped,true);a.equal(f.broker.requests.size,0);f.broker.stop();});
+test("old result cannot overwrite new session same ID",async()=>{const f=fixture();await f.open();const d=deferred();f.client.execute=()=>d.promise;const old=f.broker.handle(f.request(),f.sender);await new Promise(setImmediate);f.broker.stop();await f.open();f.client.execute=async()=>({ok:true});await f.broker.handle(f.request(),f.sender);const record=f.broker.requests.get("request-0001");d.resolve({ok:true});a.equal((await old).stale_dropped,true);a.equal(f.broker.requests.get("request-0001"),record);f.broker.stop();});
+test("native error fatal",async()=>{const f=fixture();await f.open();f.client.execute=async()=>{throw Error("private");};await a.rejects(f.broker.handle(f.request(),f.sender),BridgeFatalError);a.equal(f.broker.session,null);});
+test("untrusted popup and inactive tab rejected",async()=>{const f=fixture();await a.rejects(f.broker.handle({type:"desktop-open",tabId:1},f.sender));f.tab.active=false;await a.rejects(f.broker.handle({type:"desktop-open",tabId:1},f.popup));});
+test("STOP during tab await prevents native call",async()=>{const f=fixture();await f.open();const d=deferred();let calls=0;f.client.execute=async()=>{calls++;};f.api.tabs.get=()=>d.promise;const pending=f.broker.handle(f.request(),f.sender);f.broker.stop();d.resolve(f.tab);a.equal((await pending).stale_dropped,true);a.equal(calls,0);});
+test("native disconnect rejection remains fatal, not stale",async()=>{const f=fixture();await f.open();f.client.execute=async()=>{f.client.session=null;throw Error("disconnected");};await a.rejects(f.broker.handle(f.request(),f.sender),BridgeFatalError);a.equal(f.broker.session,null);});

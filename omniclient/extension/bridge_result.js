@@ -43,7 +43,15 @@ function normalizeBridgeScreenshot(native) {
   if (btoa(binary) !== base64 || binary.length > 614400) throw Error("Screenshot preview size or encoding invalid");
   const actual = screenshotDimensions(binary, image.mime);
   if (actual.width < 1 || actual.height < 1 || actual.width > 1280 || actual.height > 800 || actual.width !== width || actual.height !== height) throw Error("Screenshot binary dimensions exceed limits or mismatch metadata");
-  return {kind:"image", mime:image.mime, width:actual.width, height:actual.height, bytes:binary.length, data_url:"data:" + image.mime + ";base64," + base64};
+  return {kind:"image", mime:image.mime, width:actual.width, height:actual.height, source_width:image.width, source_height:image.height, bytes:binary.length, data_url:"data:" + image.mime + ";base64," + base64};
 }
-if (typeof module !== "undefined" && module.exports) module.exports = {normalizeBridgeScreenshot, screenshotDimensions};
-else globalThis.normalizeBridgeScreenshot = normalizeBridgeScreenshot;
+// Pure geometry only: not a desktop authorization, freshness check or DPI proof.
+function mapScreenshotPoint(image,x,y) {
+  if (!image || image.kind!=="image") throw Error("INVALID_SCREEN_REFERENCE");
+  const {width,height,source_width:sw,source_height:sh}=image;
+  if (![width,height,sw,sh].every(Number.isSafeInteger) || width<1 || height<1 || width>1280 || height>800 || sw<width || sh<height || sw*sh>33554432) throw Error("INVALID_SCREEN_GEOMETRY");
+  if (!Number.isSafeInteger(x) || !Number.isSafeInteger(y) || x<0 || y<0 || x>=width || y>=height) throw Error("POINT_OUTSIDE_PREVIEW");
+  return {x:Math.floor(x*sw/width),y:Math.floor(y*sh/height)};
+}
+if (typeof module !== "undefined" && module.exports) module.exports = {normalizeBridgeScreenshot, screenshotDimensions, mapScreenshotPoint};
+else {globalThis.normalizeBridgeScreenshot = normalizeBridgeScreenshot;globalThis.mapScreenshotPoint = mapScreenshotPoint;}

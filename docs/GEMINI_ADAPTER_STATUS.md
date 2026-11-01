@@ -1,11 +1,13 @@
-# Adapter Gemini: screenshot locale provato, consegna in verifica
+# Gemini: testo reale provato, immagine in verifica
 
-Riferimento: 5ab251181a1fe146b5029ebf0529405e2331cf33. Tutti gli 11 check success. Leggere CURRENT_STATUS.md e SECURITY.md.
+Baseline 55291dbd3b65f16f03b923a770657972865674c4, tutti gli 11 check success. e2e-footer-003 prova lo screenshot locale; e2e-text-004 prova ritorno testuale e risposta di Gemini con ID e dimensioni. Evidenze dell'utente, non esecuzione fisica dell'assistente.
 
-La prova utente e2e-footer-003 mostra screenshot Windows nel pannello. Il footer reale message-actions contiene thumb-up-button, thumb-down-button, regenerate-button e copy-button. Il controllo richiede anche assenza di streaming, quiescenza e conferma locale; non richiede gli attributi aria-busy/data-is-streaming false assenti nella prova. Non e una certificazione universale di Gemini o della virtualizzazione.
+Il footer message-actions richiede quattro controlli, assenza di streaming, nascita/mutazioni osservate, quiescenza e conferma locale. Non e una garanzia universale del DOM Gemini. Il parser rifiuta omninode_response e gli ID del registro consegna.
 
-La tranche introduce deliveryLedger, PREPARED distinto da INSERTED, SEND_REQUESTED, SENT_CONFIRMED e SEND_UNCERTAIN_HALT. Bozza/allegati rilevati bloccano l'inserimento; modifica utente lo abortisce. Il JSON omninode_response/completed_action non e un comando; gli ID consegna gia registrati sono rifiutati dal parser.
+La tranche immagine aggiunge: allegato richiesto con consenso esplicito, File PNG/JPEG con estensione corretta dai byte gia normalizzati, un solo paste sintetico sul composer del testo proprio, nessuna clipboard di sistema. Upload sintetico non ancora validato sul provider reale.
 
-Inserimento e invio testuali richiedono due click espliciti e rivalidazione del grant. SENT_CONFIRMED richiede nuovo user-query con payload esatto, composer vuoto e generazione osservata: e evidenza DOM, non ricevuta server. execCommand e user-query restano da provare sul provider reale.
+ATTACHMENT_PENDING -> ATTACHMENT_READY_FOR_CONFIRM richiede una sola nuova img caricata, niente upload/alert rilevati e 3 secondi stabili. Il click yes conferma che l'utente vede lo screenshot nell'input Gemini, l'upload e concluso e autorizza l'unico invio: ATTACHMENT_VERIFIED, verification=user-confirmed. Non e verifica automatica dei byte caricati o del server. Il controllo resta conservativo: varianti DOM non riconosciute possono bloccare il flusso.
 
-L'immagine e scaricabile su click come passaggio assistito; nessun paste/drop sintetico, clipboard implicita, upload automatico o ATTACHMENT_VERIFIED fittizio. L'invio controllato blocca gli allegati rilevati. La diagnostica generazione 12 s e ritirata; e disponibile una diagnostica composer di sola lettura nel risultato.
+Dopo il tentativo, timeout/errore/preview sostituita bloccano con ATTACHMENT_UNCERTAIN_HALT; nessun fallback automatico a un secondo upload. L'invio richiede testo invariato e preview confermata invariata. Nessun allegato preesistente viene rimosso. SENT_CONFIRMED per il modo immagine richiede immagine nel nuovo user-query correlato; se il selettore non rileva il messaggio, esito incerto terminale senza retry.
+
+Test con fixture non certificano l'upload reale. Accettazione finale: Gemini riceve l'immagine e descrive un particolare visivo non deducibile dal JSON. Il testo e gia provato, non va ripetuto solo per conteggi. Leggere CURRENT_STATUS.md e SECURITY.md.

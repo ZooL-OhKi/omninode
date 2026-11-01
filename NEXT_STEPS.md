@@ -1,11 +1,10 @@
 # Prossimi passi operativi
 
-Vedere docs/CURRENT_STATUS.md e SECURITY.md. e2e-footer-003 prova screenshot Windows nel pannello, non immagine ricevuta da Gemini.
+Leggere docs/CURRENT_STATUS.md e SECURITY.md. e2e-footer-003 e e2e-text-004 provano rispettivamente screenshot nel pannello e ritorno testuale nella chat, non ancora immagine ricevuta dal modello.
 
-1. Provare una sola consegna testuale controllata: preparazione, inserimento su composer vuoto, unico click invio, messaggio uscente correlato e risposta di Gemini. SEND_UNCERTAIN_HALT e terminale: nessun retry.
-2. Verificare bozza, modifica durante attesa, allegato preesistente, upload in corso, cambio sessione, duplicati e click unico; fixture/CI non sostituiscono la prova reale.
-3. Chiudere il ritorno immagine con consenso alla condivisione e prova di upload effettivo e correlato. Download e soltanto assistito. Nessun base64 nel prompt o evento sintetico spacciato per upload.
-4. Verificare STOP popup/nativo, scadenza, reload e disconnessione fisici; poi DPI, Unicode e multi-monitor.
-5. Solo dopo il circuito completo, coordinamento con una seconda chat IA e consenso ai dati condivisi.
+1. Provare un solo allegato screenshot dopo inserimento testo: consenso alla condivisione, singolo paste, preview stabile, conferma yes nell'input Gemini, unico invio, dettaglio visivo riconosciuto dal modello.
+2. ATTACHMENT_UNCERTAIN_HALT e SEND_UNCERTAIN_HALT sono terminali: nessun retry o secondo upload. Non inferire successo da paste, preview locale o semplice composer vuoto.
+3. Verificare con test automatici e prova mirata: bozza, allegati preesistenti, upload attivo/fallito, preview cambiata, STOP/scadenza/navigazione durante attese, duplicati e click unico. Distinguere conferma umana, fixture, DOM e prova reale.
+4. Chiudere propagazione STOP nativo/browser, persistenza, DPI, Unicode e multi-monitor prima di ampliare il perimetro; poi seconda chat IA con consenso ai dati condivisi.
 
-Preservare mTLS/ACL, TLS 1.3, OpenRoot/O_EXCL e recuperi. Restano hardening UI Go, metadati e idempotenza crash-safe. Niente merge/deploy impliciti o sincronizzazione diretta di .git con Drive.
+Preservare mTLS/ACL, TLS 1.3, OpenRoot/O_EXCL e branch di recupero. Nessun merge/deploy implicito. Riparare separatamente il clone A: senza cancellazioni; non sincronizzare .git con Drive.

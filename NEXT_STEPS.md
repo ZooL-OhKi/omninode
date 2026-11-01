@@ -1,34 +1,25 @@
 # Prossimi passi e criteri di completamento
 
-Leggere [handover da zero](docs/ZERO_CONTEXT_HANDOVER.md), [stato](docs/CURRENT_STATUS.md), AGENTS.md e SECURITY.md. Il test immagine `e2e-image-006` è riuscito con conferme locali: non lasciarlo fra le prove ancora da eseguire. Non equivale al completamento dell’intero progetto.
+Leggere [stato corrente](docs/CURRENT_STATUS.md), [handover](docs/ZERO_CONTEXT_HANDOVER.md), AGENTS.md e SECURITY.md.
 
-## Stato raggiunto
+## Baseline
 
-Il commit `7ce0eb6c3a304b098d17e4ada5f8bb9cf6e90f0e` implementa la consegna automatica autorizzata one-shot nel composer Gemini.
+ee7565746809147cecb1be2dd91990ce127d56f7, estensione 0.3.1: 11 check GitHub completed/success al controllo della sessione. Questo commit documentale e successivo e non eredita automaticamente quei risultati. PR #9 aperta, non mergiata.
 
-La suite locale è stata eseguita con:
+## Prossimo intervento utile
 
-```powershell
-node --test omniclient/extension/*.test.cjs
-```
+1. Preparare la distribuzione locale coerente di sorgenti nativi e file estensione, inclusi notepad_task.py e task_delivery.js, dopo verifica degli effettivi percorsi installati, delle modifiche locali e dei backup. Non riusare il vecchio updater fissato a 54d5dda5. Non cambiare ID/origine dell'estensione, registro, venv o dipendenze senza motivo e approvazione specifica.
+2. Eseguire una sola prova fisica mirata del compito delimitato: screenshot recente -> notepad_write con testo esatto e share_result:true -> unico OK locale sul compito -> click e digitazione -> risultato e immagine inviati automaticamente. Conservare ID, versione installata, esito e limite. Verificare il testo nell'immagine, non soltanto status executed.
+3. Verificare gli arresti realmente non coperti: bozza/allegato presenti, preview differente o non leggibile, STOP/scadenza durante attese, cambio bersaglio/focus e disconnessione. Nessuna ripetizione di effetti incerti. Usare sandbox e CI per i casi eseguibili autonomamente; non riversare tutta la suite sull'utente.
+4. Rendere verificabili STOP nativo -> browser e browser -> nativo, anche durante input e consegna; non promettere di annullare input gia ricevuti dal sistema operativo.
+5. Revisionare i registri di idempotenza esistenti e provare crash/restart senza replay di input o invii incerti. Non aggiungere un ledger parallelo come scorciatoia.
+6. Validare DPI, Unicode, privilegi applicativi e focus sul Windows fisico. Multi-monitor non e completato: il percorso attuale e limitato al display primario.
+7. Ampliare l'autonomia tramite concessioni per obiettivo, risorse, azioni e durata. Non rimuovere globalmente i gate: il compito Blocco note non autorizza acquisti, messaggi, installazioni o modifiche ad altri file/applicazioni.
+8. Verificare hardening Go e trasporti effettivamente avviati prima di distribuzioni Oracle. Preservare mTLS/ACL, TLS 1.3, OpenRoot/O_EXCL; nessuna shell arbitraria o porta pubblica non protetta.
+9. Collegare una seconda IA tramite un canale reale autorizzato, solo dopo il ciclo locale utile; la revisione Gemini inoltrata dall'utente non prova orchestrazione automatica.
 
-Esito: 165 pass, 0 fail. Sono coperti bozze, modifiche concorrenti, sessioni scadute, duplicati, upload, preview, STOP/scadenza, un solo click di invio e anti-loop.
+## Evidenze da non confondere
 
-## Ordine operativo
+Il resoconto e2e-image-006 e le schermate successive attestano singole consegne assistite, non il nuovo compito autonomo. I 165 test locali storici non validano la nuova patch; le fixture errate furono corrette. I 30 test Python, 6 helper e 12 Node eseguiti dall'assistente hanno perimetri diversi, descritti nello stato. Non sommarli per dichiarare una suite end-to-end.
 
-1. Ricaricare l’estensione non pacchettizzata in Chrome e verificare una nuova consegna automatica con ID nuovo. Accettazione: composer libero, inserimento del solo payload OmniNode, un solo invio, evidenza del messaggio uscente e `SENT_CONFIRMED`; bozze e allegati preesistenti intatti.
-2. Verificare HEAD, diff e CI del branch. La baseline `9316f6b2` aveva 11 check verdi; i commit successivi vanno controllati separatamente.
-3. Chiarire lo stato delle copie senza rischi: `C:` attiva, `A:` con precedente ref `desktop.ini` e allineamento non confermato. Non sincronizzare `.git` tramite Drive e non cancellare recuperi.
-4. Chiudere propagazione STOP nativo/browser e race: revoca deve fermare nuove azioni e invalidare operazioni pendenti in entrambe le direzioni. Non promettere annullamento di input già consegnati al sistema operativo.
-5. Revisionare e consolidare i registri di idempotenza esistenti; provare riavvio/crash senza replay di effetti incerti. Non aggiungere un altro ledger come scorciatoia.
-6. Validare Unicode, DPI e multi-monitor, quindi estendere le azioni desktop nella conversazione con policy e consenso specifici.
-7. Completare hardening Go e revisione dei trasporti effettivamente avviati. UI HTTP, MQTT, MCP e Native Messaging non sono intercambiabili.
-8. Validare una seconda chat IA reale con consenso sui dati condivisi, un responsabile per patch e risultati correlati. Non simulare una collaborazione.
-
-## Condizioni non negoziabili
-
-`ATTACHMENT_UNCERTAIN_HALT` e `SEND_UNCERTAIN_HALT` sono terminali: nessun retry o secondo upload automatico. Non inferire successo dal paste, dalla sola preview locale o dal composer vuoto. Nessun segreto in Git/chat/log, nessuna shell remota arbitraria, porta pubblica, elevazione automatica o fallback plaintext. Preservare mTLS/ACL, TLS 1.3 e OpenRoot/O_EXCL.
-
-## Quando dichiarare finito
-
-Dimostrare, nel perimetro autorizzato, un ciclo osservazione -> azione -> risultato -> prosecuzione nella stessa chat; azioni richieste effettivamente collegate e testate; STOP/scadenza/navigazione fail-closed; duplicati e crash senza replay incerto; dati e credenziali confinati secondo policy; collaborazione IA reale se inclusa nella consegna. Documentare per requisito codice, test, prova reale e limite residuo. CI verde o un singolo screenshot non bastano. Merge, release e deploy hanno gate propri: nessuno è implicito nel completamento della documentazione.
+CI verde, file copiati, processo caricato, input fisico e risultato letto dal modello sono evidenze distinte. Dichiarare completato solo il requisito effettivamente dimostrato. Merge, release, modifiche dei servizi, allineamento C:/A:/Drive e deploy hanno gate separati.

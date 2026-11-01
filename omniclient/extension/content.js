@@ -31,11 +31,21 @@ class OneShotGate{
   arm(turn){this.turn=turn;}
   allow(turn,id,confirmed=false){if(this.used.has(id)||(!confirmed&&this.turn!==turn))return false;this.turn=null;this.used.add(id);return true;}
 }
+function footerCompletion(node) {
+  const selectors=["thumb-up-button button","thumb-down-button button","regenerate-button button","copy-button button"];
+  const available=el=>Boolean(el && !el.disabled && el.getAttribute("aria-disabled")!=="true" && !el.closest('[hidden], [aria-hidden="true"], [inert]') && el.getClientRects().length>0);
+  const bars=[...node.querySelectorAll("message-actions")].filter(bar=>bar.closest("model-response")===node && !bar.closest("pre, code-block"));
+  if(bars.length!==1)return {complete:false,signature:""};
+  const bar=bars[0];
+  const groups=selectors.map(selector=>[...bar.querySelectorAll(selector)].filter(b=>b.closest("message-actions")===bar && !b.closest("pre, code-block")));
+  const complete=groups.every(group=>group.length===1 && available(group[0]));
+  const signature=JSON.stringify({groups:groups.map(group=>group.map(available)),buttons:[...bar.querySelectorAll("button")].map(available)});
+  return {complete,signature};
+}
 function isSettled(s,ms){return s.streaming===false&&s.completionReady===true&&ms>=3000;}
-if(typeof module!=="undefined"&&module.exports){module.exports={parseRequest,canDeliver,isSettled,prepareResultDelivery,LiveBirthGate,OneShotGate};return;}
+if(typeof module!=="undefined"&&module.exports){module.exports={parseRequest,canDeliver,isSettled,prepareResultDelivery,LiveBirthGate,OneShotGate,footerCompletion};return;}
 if(globalThis.__omninodeBridge)return;globalThis.__omninodeBridge=true;
-// Disabled until real provider completion controls and lifecycle are validated.
-const COMPLETION_SELECTORS=Object.freeze([]);
+// Footer structure observed in the Windows Gemini diagnostic on 2026-11-01.
 const STOP_SELECTOR='button[data-test-id="stop-button"], button[aria-label="Stop response"], button[aria-label="Interrompi risposta"], button[aria-label="Stop generating"], button[aria-label="Interrompi generazione"]';
 let session=null;
 const host=document.createElement("div");host.style.cssText="position:fixed;right:18px;bottom:18px;z-index:2147483647";
@@ -47,9 +57,9 @@ const nodes=()=>[...document.querySelectorAll("model-response")];
 const visible=el=>el&&!el.disabled&&el.getAttribute("aria-disabled")!=="true"&&el.getClientRects().length>0;
 function signals(node){
   const blocks=[...node.querySelectorAll("pre")];let request=null;try{if(blocks.length===1)request=parseRequest(blocks[0].textContent||"");}catch{}
-  const controls=COMPLETION_SELECTORS.flatMap(s=>[...node.querySelectorAll(s)].filter(visible).map(()=>s));
+  const footer=footerCompletion(node);
   const streaming=Boolean(node.matches('[aria-busy="true"], [data-is-streaming="true"]')||node.querySelector('[aria-busy="true"], [data-is-streaming="true"]')||[...document.querySelectorAll(STOP_SELECTOR)].some(visible));
-  return {text:node.textContent||"",controls:controls.join("|"),complete:controls.length>0,streaming,valid:Boolean(request),blockCount:blocks.length,request};
+  return {text:node.textContent||"",controls:footer.signature,complete:footer.complete,streaming,valid:Boolean(request),blockCount:blocks.length,request};
 }
 function active(s){return session===s&&Date.now()<s.expiresAt&&location.origin+location.pathname===s.conversation;}
 function localStop(text){session=null;confirm.hidden=true;status.textContent=text;}
@@ -67,7 +77,7 @@ chrome.runtime.onMessage.addListener((m,sender,reply)=>{
   session=s;confirm.hidden=true;resultBox.textContent="";
   chrome.runtime.sendMessage({type:"bridge-bind",activation_id:s.activation}).then(r=>{
     if(!active(s)||!r?.ok||r.activation_id!==s.activation){if(session===s)localStop("Aggancio documento fallito");reply({ok:false});return;}
-    status.textContent="Sessione autorizzata. Fine risposta non validata: esecuzione bloccata; disponibile diagnostica 12 s.";reply({ok:true});
+    status.textContent="Sessione autorizzata: attendo un nuovo turno con footer completo e conferma locale.";reply({ok:true});
   }).catch(()=>{if(session===s)localStop("Aggancio documento fallito");reply({ok:false});});return true;
 });
 function candidate(s){const node=nodes().at(-1);if(!node)return null;const signal=signals(node);return {node,signal,state:s.birth.sample(node,signal,performance.now())};}

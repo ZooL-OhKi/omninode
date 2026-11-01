@@ -8,7 +8,8 @@ from windows_input_backend import WindowsInputBackend, make_windows_backend
 OP_BUDGET_SEC = 12.0
 SCHEMAS = {"screenshot": set(), "move": {"x", "y"}, "click": {"x", "y", "button"},
            "scroll": {"steps"}, "press": {"key"}, "hotkey": {"keys"},
-           "type": {"text"}, "drag": {"x", "y", "to_x", "to_y"}}
+           "type": {"text"}, "drag": {"x", "y", "to_x", "to_y"},
+           "notepad_write": {"x", "y", "text"}}
 
 
 class DesktopSession:
@@ -49,7 +50,7 @@ class DesktopSession:
             if not self._executor.valid_key(value):
                 raise ValueError("unsupported key")
 
-        if action in {"move", "click", "drag"}:
+        if action in {"move", "click", "drag", "notepad_write"}:
             point(args["x"], args["y"])
         if action == "drag":
             point(args["to_x"], args["to_y"])
@@ -64,9 +65,9 @@ class DesktopSession:
                 raise ValueError("hotkey limit exceeded")
             for value in args["keys"]:
                 key(value)
-        if action == "type":
+        if action in {"type", "notepad_write"}:
             text = args["text"]
-            limit = 256 if self._executor.natural else 4096
+            limit = 256 if self._executor.natural or action == "notepad_write" else 4096
             if not isinstance(text, str) or not 1 <= len(text) <= limit:
                 raise ValueError("text limit exceeded")
             if any(ord(c) < 32 or 127 <= ord(c) <= 159 or 0xd800 <= ord(c) <= 0xdfff for c in text):
@@ -93,7 +94,11 @@ class DesktopSession:
             self._validate(action, args)
             check()
             try:
-                result = self._executor.perform(action, args, check, wait)
+                if action == "notepad_write":
+                    from notepad_task import run_notepad_write
+                    result = run_notepad_write(self._executor, args, check, wait)
+                else:
+                    result = self._executor.perform(action, args, check, wait)
                 check()
                 return result
             except self._executor.raw.FailSafeException:

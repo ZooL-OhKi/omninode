@@ -9,7 +9,7 @@ import sys
 import venv
 
 REQUIRED_SOURCE_FILES = ("native_host.py", "native_channel.py", "native_bootstrap.py",
-                         "desktop_control.py", "windows_input_backend.py",
+                         "desktop_control.py", "windows_input_backend.py", "notepad_task.py",
                          "screen_preview.py", "requirements-windows.txt")
 
 

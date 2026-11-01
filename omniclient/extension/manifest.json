@@ -1,10 +1,10 @@
 {
   "manifest_version": 3,
   "name": "OmniNode Bridge",
-  "version": "0.2.1",
-  "description": "Canale desktop nativo con consenso locale, sessione autorizzata e consegna testuale controllata.",
+  "version": "0.3.0",
+  "description": "Desktop autorizzato con conferma locale per azione e ritorno screenshot nella chat.",
   "permissions": ["activeTab", "tabs", "nativeMessaging"],
   "background": {"service_worker": "service_worker.js"},
   "action": {"default_title": "OmniNode Desktop", "default_popup": "desktop.html"},
-  "content_scripts": [{"matches": ["https://gemini.google.com/*"], "js": ["text_delivery.js", "content.js"], "run_at": "document_idle"}]
+  "content_scripts": [{"matches": ["https://gemini.google.com/*"], "js": ["action_policy.js", "text_delivery.js", "content.js"], "run_at": "document_idle"}]
 }

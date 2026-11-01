@@ -5,7 +5,7 @@ class DeliveryLedger {
     if(!this.isActive())throw Error("STALE_RESULT");
     if(this.records.has(id))throw Error("DUPLICATE_RESULT");
     const text=JSON.stringify({omninode_response:true,request_id:id,status:"ok",completed_action:"screenshot",width:image.width,height:image.height,bytes:image.bytes,mime:image.mime});
-    const r={id,text,image,attachmentAttempted:false,attachmentRequired:false,state:"PREPARED",attachment:"NONE",sendAttempted:false,busy:false,editor:null,snapshot:null};this.records.set(id,r);return r;
+    const r={id,text,image,attachmentAttempted:false,attachmentRequired:false,state:"PREPARED",attachment:"NONE",sendAttempted:false,busy:false,autoAttempted:false,editor:null,snapshot:null};this.records.set(id,r);return r;
   }
   abort(r){r.state=r.sendAttempted?"SEND_UNCERTAIN_HALT":"ABORTED_SESSION_CHANGE";}
   abortAll(){for(const r of this.records.values())if(!["SENT_CONFIRMED","SEND_UNCERTAIN_HALT"].includes(r.state))this.abort(r);}
@@ -90,6 +90,14 @@ class DeliveryLedger {
     }catch{r.state=r.sendAttempted?"SEND_UNCERTAIN_HALT":"ABORTED_SESSION_CHANGE";}
     finally{r.busy=false;}
   }
+  async autoDeliver(id,io){
+    const r=this.records.get(id);
+    if(!r||r.busy||r.autoAttempted||r.sendAttempted)return r;
+    r.autoAttempted=true;
+    await this.insert(id,io);
+    if(r.state==="INSERTED")await this.send(id,io);
+    return r;
+  }
 }
 // Input comes from bridge_result.js; this checks transport bounds, not full codec validity.
 function screenshotFile(image,id,FileType=File){
@@ -136,14 +144,16 @@ function mountTextDelivery(session,image,id,box,options){
   }};
   const state=doc.createElement("div"),insert=doc.createElement("button"),send=doc.createElement("button"),download=doc.createElement("button"),payload=doc.createElement("textarea"),diagnostic=doc.createElement("button");
   insert.textContent="Inserisci risultato testuale";send.textContent="Invia risultato testuale (un tentativo, senza immagine)";download.textContent="Scarica screenshot per allegarlo manualmente";diagnostic.textContent="Diagnostica composer (sola lettura)";
-  const attach=doc.createElement("button"),verify=doc.createElement("button");
+  const attach=doc.createElement("button"),verify=doc.createElement("button"),auto=doc.createElement("button");
   attach.textContent="Inserisci risultato e allega screenshot a Gemini (condivide l'immagine)";
   verify.textContent="yes — confermo screenshot nell'input Gemini, upload concluso e autorizzo l'invio";
-  box.append(attach,verify);
+  auto.textContent="Autorizza consegna automatica nel composer (inserimento + invio, un tentativo)";
+  box.append(attach,verify,auto);
   payload.readOnly=true;payload.value=r.text;box.append(state,insert,send,download,diagnostic,payload);
-  function refresh(){ledger.observe(r,io);state.textContent=r.state+" — "+r.attachment+(r.attachmentVerification?" (conferma utente)":"")+(r.reason?" — "+r.reason:"");insert.disabled=r.busy||!["PREPARED","DRAFT_PROTECTED_HOLD"].includes(r.state);send.textContent=r.attachmentRequired?"Invia testo e immagine confermata (un tentativo)":"Invia risultato testuale (un tentativo, senza immagine)";send.disabled=r.busy||r.state!=="INSERTED"||r.sendAttempted||(r.attachmentRequired&&r.attachment!=="ATTACHMENT_VERIFIED");attach.disabled=r.busy||!["PREPARED","DRAFT_PROTECTED_HOLD","INSERTED"].includes(r.state)||r.attachmentAttempted||r.sendAttempted;verify.hidden=r.attachment!=="ATTACHMENT_READY_FOR_CONFIRM";verify.disabled=r.busy;download.disabled=!options.isActive();}
+  function refresh(){ledger.observe(r,io);state.textContent=r.state+" — "+r.attachment+(r.attachmentVerification?" (conferma utente)":"")+(r.reason?" — "+r.reason:"");insert.disabled=r.busy||!["PREPARED","DRAFT_PROTECTED_HOLD"].includes(r.state);send.textContent=r.attachmentRequired?"Invia testo e immagine confermata (un tentativo)":"Invia risultato testuale (un tentativo, senza immagine)";send.disabled=r.busy||r.state!=="INSERTED"||r.sendAttempted||(r.attachmentRequired&&r.attachment!=="ATTACHMENT_VERIFIED");attach.disabled=r.busy||!["PREPARED","DRAFT_PROTECTED_HOLD","INSERTED"].includes(r.state)||r.attachmentAttempted||r.sendAttempted;verify.hidden=r.attachment!=="ATTACHMENT_READY_FOR_CONFIRM";verify.disabled=r.busy;auto.disabled=r.busy||r.autoAttempted||r.sendAttempted||!["PREPARED","DRAFT_PROTECTED_HOLD","INSERTED"].includes(r.state);download.disabled=!options.isActive();}
   attach.addEventListener("click",async e=>{if(!e.isTrusted)return;await ledger.insert(id,io);await ledger.attach(id,io);refresh();});
   verify.addEventListener("click",async e=>{if(!e.isTrusted)return;await ledger.confirmAttachment(id,io);if(r.attachment==="ATTACHMENT_VERIFIED")await ledger.send(id,io);refresh();});
+  auto.addEventListener("click",async e=>{if(!e.isTrusted)return;await ledger.autoDeliver(id,io);refresh();});
   insert.addEventListener("click",async e=>{if(!e.isTrusted)return;await ledger.insert(id,io);refresh();});
   send.addEventListener("click",async e=>{if(!e.isTrusted)return;await ledger.send(id,io);refresh();});
   download.addEventListener("click",e=>{if(!e.isTrusted||!options.isActive())return;const a=doc.createElement("a");a.href=image.data_url;a.download="omninode-"+id+(image.mime==="image/jpeg"?".jpg":".png");a.click();if(!r.attachmentAttempted)r.attachment="ATTACHMENT_ASSISTED_REQUIRED";state.textContent=r.state+" — allegato manuale non verificato; nessun upload automatico";});

@@ -1,11 +1,11 @@
 # Prossimi passi operativi
 
-Riferimento: [stato corrente](docs/CURRENT_STATUS.md). Non riaprire task storici gia risolti sulla base di vecchi conteggi o branch.
+Vedere docs/CURRENT_STATUS.md e SECURITY.md. e2e-footer-003 prova screenshot Windows nel pannello, non immagine ricevuta da Gemini.
 
-1. Collegare questa conversazione autorizzata al broker nativo, con provenienza della richiesta, fine risposta affidabile e rifiuto di esempi/cronologia.
-2. Restituire automaticamente risultati e immagini nella stessa chat, correlati alla richiesta, senza alterare bozze o avviare loop illimitati.
-3. Verificare installer e host Windows reali, consenso, STOP, disconnessione e scadenza; calibrare coordinate/DPI e documentare gli effetti parziali senza retry di input.
-4. Dimostrare una sola azione innocua completa prima di ampliare il perimetro. Per workspace.write: duplicato senza nuova scrittura, conflitto di payload e rifiuto non autorizzato.
-5. Aggiungere coordinamento reale con una seconda chat IA, consenso ai dati condivisi e un solo responsabile per ogni file.
+1. Provare una sola consegna testuale controllata: preparazione, inserimento su composer vuoto, unico click invio, messaggio uscente correlato e risposta di Gemini. SEND_UNCERTAIN_HALT e terminale: nessun retry.
+2. Verificare bozza, modifica durante attesa, allegato preesistente, upload in corso, cambio sessione, duplicati e click unico; fixture/CI non sostituiscono la prova reale.
+3. Chiudere il ritorno immagine con consenso alla condivisione e prova di upload effettivo e correlato. Download e soltanto assistito. Nessun base64 nel prompt o evento sintetico spacciato per upload.
+4. Verificare STOP popup/nativo, scadenza, reload e disconnessione fisici; poi DPI, Unicode e multi-monitor.
+5. Solo dopo il circuito completo, coordinamento con una seconda chat IA e consenso ai dati condivisi.
 
-Hardening ancora aperto: API/bind/origini UI Go, metadati workspace e idempotenza concorrente/crash-safe, Unicode e multi-monitor, audit del percorso desktop. Non usare VPS, nuovi protocolli o nuove roadmap per rinviare il circuito locale. Nessun merge/deploy solo per dichiarare tutto allineato.
+Preservare mTLS/ACL, TLS 1.3, OpenRoot/O_EXCL e recuperi. Restano hardening UI Go, metadati e idempotenza crash-safe. Niente merge/deploy impliciti o sincronizzazione diretta di .git con Drive.

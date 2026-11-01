@@ -1,24 +1,34 @@
 # Ripresa operativa e copie da preservare
 
-Riferimento: 16 ottobre 2026, codice b669ec404007e01d56b12d502887f695895a8ae1. Per capacita e CI usare lo [stato corrente](docs/CURRENT_STATUS.md); i precedenti conteggi locali non descrivono i commit successivi.
+Aggiornamento: 1 novembre 2026, sessione fino alle 03:21 CET. [Handover da zero](docs/ZERO_CONTEXT_HANDOVER.md) e [stato corrente](docs/CURRENT_STATUS.md) prevalgono sulle descrizioni operative storiche. I dettagli di backup sotto sono da preservare, non inviti a fare restore.
 
-## Stato di ripresa
+## GitHub e prove
 
-Branch feature/bridge-gemini-vertical, PR #9 non integrata al controllo di baseline. Base handover: 86fe9f2ab8805cd850bf60811de10fb813012cd5. Il recupero PR #8 e consolidato sul branch handover, non su main. Non eliminare local-work-20261016-005605 e non uniformarne la storia con reset o force push.
+Repository ZooL-OhKi/omninode, branch feature/bridge-gemini-vertical, PR #9 aperta verso ai-handover-20261015-worker2. Base handover 86fe9f2ab8805cd850bf60811de10fb813012cd5; codice/CI verificato 9316f6b2eecb252ffe7c7447549bd91a36b91a0f, 11 check success. Rileggere HEAD dopo ogni commit. Il recupero PR #8 e consolidato sul branch handover, non su main.
 
-Sono presenti estensione, bridge HTTP e host desktop nativo. Il file tool Go ora usa creazione esclusiva e OpenRoot: le vecchie affermazioni su os.WriteFile/sovrascritture erano superate. Questo non rende sicuri tutti i metadati o tutte le API. Il ritorno automatico nella chat reale resta non dimostrato.
+Il ritorno testuale e quello immagine sono stati osservati nella chat Gemini con conferme locali; e2e-image-006 e riuscito. Non attribuire all'assistente accesso fisico al PC o un contatto autonomo con Gemini. Nessun deploy e provato da questa sessione.
 
 ## Copie e backup
 
-- Copia Windows attiva: C:\Users\ugopl\omninode-github; modulo omniclient. Ultimo SHA locale esplicitamente mostrato nella sessione: ae21a159864689126ea7aa7e089fef536d72031d. Gli aggiornamenti successivi del PC non sono certificati da questa nota.
-- Backup verificato dall'utente: C:\Users\ugopl\omninode-github-backup-20261016-005605, 186 file e zero fallimenti Robocopy.
+- Windows attiva: C:\Users\ugopl\omninode-github. Il vecchio SHA locale esplicitamente annotato ae21a159864689126ea7aa7e089fef536d72031d e storico, non certifica lo SHA attuale.
+- Backup verificato dall'utente: C:\Users\ugopl\omninode-github-backup-20261016-005605, 186 file e zero fallimenti Robocopy nella prova storica.
 - Copia storica: A:\omninode; backup A:\omninode-backup-20261015-223838.
-- Branch di sicurezza: backup/windows-before-sync-20261015-224242. Stash da cercare tramite messaggio Windows prima allineamento 20261015-224242, non tramite indice fisso.
+- Copia A: coinvolta nell'ultimo tentativo: A:\omninode-clean-20261101-011658. Ha segnalato desktop.ini in .git/refs; riparazione e allineamento non confermati.
+- Branch da preservare: local-work-20261016-005605 e backup/windows-before-sync-20261015-224242.
+- Stash da cercare tramite messaggio Windows prima allineamento 20261015-224242, non mediante indice fisso.
 
-GoogleDriveFS aveva un handle sulla copia A:. Non chiudere Drive, smontare volumi, cambiare permessi o cancellare oggetti Git alla cieca. La condivisione con Gemini e voluta, ma non prova sincronizzazione o accesso shell.
+Non uniformare queste storie con reset, force push o cancellazioni. GoogleDriveFS aveva un handle sulla copia A:. Non chiudere processi, smontare volumi, modificare permessi o cancellare oggetti Git alla cieca. Evitare la sincronizzazione diretta di .git con Drive; preferire snapshot versionati senza metadati Git.
 
-## VPS: storia, non salute attuale
+## Ultimo tentativo di allineamento
 
-Orchestratore omninode-orchestrator; archivista omninode-archivista-vcn. Le sorgenti /home/ubuntu/omninode erano state allineate dall'utente a 86fe9f2. Archivista esegue /opt/omninode/omniclient/omniclient con WorkingDirectory /opt/omninode/omniclient: un pull altrove non aggiorna quel binario. Nessun deploy o riavvio e provato da questa manutenzione.
+Il primo allegato PowerShell ha fallito il parsing alle 03:18 CET: stringa con $repo: invece di ${repo}:. Il blocco non e stato eseguito. E stato rimandato il file corretto; non e arrivato un output che provi la sua esecuzione.
 
-Il report omniclient/local-verification-report.txt e un'evidenza storica del 15 ottobre, non il risultato corrente. Copilot non e una dipendenza. Nessun contatto diretto con Gemini e stato dimostrato. [Regole operative](AGENTS.md).
+Lo script proposto controllava modifiche e branch, faceva backup metadata locale prima di quarantena dei soli desktop.ini riconosciuti come Windows, verificava fsck e consentiva solo fast-forward. Esportava ZIP e JSON con SHA256, lasciando drive_upload_verified=false. Queste sono intenzioni del file, non operazioni gia attestate; non e stato eseguito/testato qui con PowerShell Windows. Non e versionato nel repository.
+
+Il target fissato era 9316f6b2eecb252ffe7c7447549bd91a36b91a0f. Nuovi commit rendono vecchio quel riferimento: non aggirare l'arresto sul remoto avanzato. Per un nuovo allineamento verificare prima HEAD e CI, preservare i recuperi e ottenere le approvazioni richieste. Un commit documentale non aggiorna automaticamente copie locali o host installati. Non dichiarare sincronizzato Drive senza verificare artefatti e hash. Non pubblicare backup .git o log console.
+
+## VPS: storia, non salute corrente
+
+Orchestratore omninode-orchestrator; archivista omninode-archivista-vcn. Le sorgenti /home/ubuntu/omninode erano state allineate dall'utente a 86fe9f2. Archivista esegue /opt/omninode/omniclient/omniclient con WorkingDirectory /opt/omninode/omniclient: un pull altrove non aggiorna quel binario. Non assumere accesso SSH, stato dei servizi o certificati validi. Nessun deploy o riavvio e provato da questa manutenzione.
+
+Il report omniclient/local-verification-report.txt e evidenza storica del 15 ottobre, non un test corrente. Copilot non e una dipendenza. Conservare AGENTS.md e SECURITY.md come regole operative.

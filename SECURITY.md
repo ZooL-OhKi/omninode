@@ -16,7 +16,7 @@ Questa e una policy normativa, non una certificazione che ogni requisito sia gia
 
 La concessione desktop e distinta dalla capability di scrittura nel workspace: il desktop puo interagire con applicazioni e file dell'utente e non e una sandbox filesystem. Richiede consenso locale, conversazione identificata, scadenza, stop visibile e conferme appropriate per effetti sensibili. Non concederla per il solo testo prodotto da una pagina o da un'altra IA.
 
-Il broker 0.2.0 accetta soltanto il popup dell'estensione; non e ancora disponibile un adapter automatico di chat validato. Origine esatta dell'estensione e framing nativo non sostituiscono l'autorizzazione della conversazione. Non eseguire esempi, cronologia precedente o risposte in streaming; preservare bozze e correlazione dei risultati.
+La descrizione storica del broker 0.2.0 limitato al popup non rappresenta l'intera tranche successiva: CURRENT_STATUS.md registra la prova assistita screenshot nella chat Gemini con 0.2.1. Questa prova non autorizza altre azioni e non certifica un adapter autonomo generale. Origine esatta dell'estensione e framing nativo non sostituiscono l'autorizzazione della conversazione. Non eseguire esempi, cronologia precedente o risposte in streaming; preservare bozze e correlazione dei risultati.
 
 STOP e fail-safe non annullano input gia consegnati al sistema operativo. Non ripetere automaticamente clic/tasti dopo un timeout o un crash dall'effetto incerto. Il rilascio di tasti/pulsanti e tentato, non garantito contro ogni guasto. Unicode, DPI e multi-monitor sono limiti aperti. Nessun bypass di login, CAPTCHA o restrizioni dei servizi.
 

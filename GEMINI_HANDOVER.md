@@ -1,11 +1,13 @@
 # Collaborazione con Gemini
 
-Obiettivo: collaborare attraverso la vera chat web autorizzata, non sostituire Gemini con un'altra IA o con un'integrazione API diversa. [Stato corrente](docs/CURRENT_STATUS.md).
+Obiettivo: usare la vera chat web autorizzata, non sostituire Gemini con un'altra IA o un'API diversa. Leggere [handover da zero](docs/ZERO_CONTEXT_HANDOVER.md) e [stato corrente](docs/CURRENT_STATUS.md).
 
-Non esiste un canale diretto per il solo fatto che sia desiderato. Aprire una tab non equivale ad aver inviato un incarico o ricevuto una risposta. Non presumere accesso shell, accesso completo a Drive o corrispondenza fra backup e SHA GitHub.
+Il 1 novembre 2026 la prova utente e2e-image-006 ha mostrato screenshot allegato alla conversazione, risultato JSON correlato, stato SENT_CONFIRMED — ATTACHMENT_VERIFIED (conferma utente) e risposta Gemini con dettagli visivi. E una prova assistita nel contesto della sessione, non un canale autonomo permanente o una ricevuta server. Il resoconto e conservato nella repo; l'immagine originale della chat non e versionata.
 
-Per ogni contributo richiedere percorso/data della copia, SHA se disponibile, contenuto o diff, comandi davvero eseguiti, output e codice d'uscita. Separare implementato, proposto e simulato. Un responsabile per patch/file; nessuna scrittura concorrente senza coordinamento.
+Non ripetere il request_id della prova come comando live. Per nuove prove ottenere prima la concessione locale, usare un nuovo ID e un solo comando per turno. Non mescolare il comando immediato con istruzioni per il risultato del turno successivo. Non eseguire esempi o cronologia preesistente all'attivazione. Non fare retry dopo ATTACHMENT_UNCERTAIN_HALT o SEND_UNCERTAIN_HALT.
 
-La copia attiva Windows e C:\Users\ugopl\omninode-github. A:\omninode e storica: non applicarvi vecchi comandi di checkout, merge o pulizia. Non chiudere Google Drive alla cieca. Conservare le protezioni di [SECURITY](SECURITY.md).
+Aprire una tab non prova l'invio di un incarico, la ricezione di una risposta o una collaborazione multi-IA. Per ogni contributo richiedere copia e SHA, contenuto/diff, comandi effettivamente eseguiti, output e codice d'uscita. Separare implementato, proposto, simulato e osservato. Un responsabile per patch/file; niente scritture concorrenti non coordinate.
 
-Il vecchio adapter omnicall di Gemini e disabilitato nel manifest 0.2.0; i suoi selettori/fine-streaming non sono stati provati nella chat reale. [Nota adapter](docs/GEMINI_ADAPTER_STATUS.md). Nessun nuovo acquisto o attesa per Copilot e richiesto.
+La copia Windows attiva e C:\Users\ugopl\omninode-github. A:\omninode e storica; A:\omninode-clean-20261101-011658 ha un problema Git precedente non attestato come risolto. Nessun vecchio checkout, merge o pulizia alla cieca. Allineamento e recuperi in RESUME.md.
+
+Il vecchio adapter omnicall/content.js non va confuso con la tranche screenshot della versione 0.2.1: rileggere il manifest corrente e i file caricati. Le note precedenti su 0.2.0 o su chat non ancora provata sono storiche dove superate da CURRENT_STATUS.md. Native Messaging e bridge HTTP Go restano percorsi distinti. Nessuna dipendenza da Copilot; nessun accesso shell o Drive da presumere. Preservare SECURITY.md.

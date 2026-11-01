@@ -1,19 +1,26 @@
-# Riprendere OmniNode
+# Riprendere OmniNode da zero
 
-Leggere prima lo [stato corrente](docs/CURRENT_STATUS.md), poi [AGENTS](AGENTS.md), [sicurezza](SECURITY.md), [architettura](ARCHITECTURE.md) e codice interessato. Baseline documentale: b669ec404007e01d56b12d502887f695895a8ae1; non presumere che sia ancora HEAD.
+Aggiornamento: 1 novembre 2026, sessione fino alle 03:21 CET. Non serve la conversazione precedente: iniziare da [handover completo](docs/ZERO_CONTEXT_HANDOVER.md).
 
-## Obiettivo
+## Ordine di lettura
 
-L'assistente deve usare OmniNode dalla stessa chat web per osservare e controllare l'ambiente autorizzato, leggere risultati reali e continuare. Mouse, tastiera, schermo e chat di altre IA fanno parte del requisito; il popup non sostituisce la conversazione. Il circuito completo e ancora mancante.
+1. [Handover da zero](docs/ZERO_CONTEXT_HANDOVER.md): obiettivo, bootstrap, prove, problemi, priorita e completamento.
+2. [Stato corrente](docs/CURRENT_STATUS.md): fonte operativa per capacita e limiti.
+3. [AGENTS](AGENTS.md) e [SECURITY](SECURITY.md): regole normative, da preservare.
+4. [RESUME](RESUME.md): copie, recuperi, branch e VPS.
+5. [BUILD](BUILD.md), [mappa](docs/REPOSITORY_MAP.md), codice e workflow della tranche.
+6. [NEXT_STEPS](NEXT_STEPS.md): verifiche residue e ordine del lavoro.
+
+## Obiettivo e baseline
+
+Rendere le IA delle chat web operative sull'ambiente esplicitamente autorizzato tramite OmniNode: osservare lo schermo, usare mouse e tastiera, leggere risultati reali, continuare nella stessa conversazione e collaborare con altre IA tramite canali reali. Non costruire un LLM sostitutivo e non confondere un popup con la chat.
+
+Repository ZooL-OhKi/omninode; branch feature/bridge-gemini-vertical; PR #9 verso ai-handover-20261015-worker2, aperta all'ultimo controllo. Baseline codice e CI verificata: 9316f6b2eecb252ffe7c7447549bd91a36b91a0f. Questo aggiornamento documentale e successivo: rileggere HEAD e CI, non fissare la baseline come HEAD corrente.
+
+La prova e2e-image-006 ha completato il circuito screenshot Windows -> allegato nella chat Gemini -> descrizione visiva, con conferme locali. Non prova controllo desktop completo, autonomia, persistenza o deploy. Le evidenze e i loro limiti sono nell'handover.
 
 ## Prima di agire
 
-Verificare strumenti disponibili, branch, SHA, differenze e CI. Leggere autonomamente e testare dove esiste un esecutore reale. Non far ripetere all'utente prove eseguibili tramite strumenti o CI. Non dichiarare accesso al PC, contatto con Gemini o esecuzione di test senza evidenze.
+Scoprire gli strumenti realmente disponibili; verificare branch, SHA, diff e CI. Eseguire autonomamente cio che l'esecutore disponibile consente. Non dichiarare accesso al PC, esecuzione di test o contatto con altre IA senza evidenze. Nessun lavoro in background inventato.
 
-La PR #9 riguarda feature/bridge-gemini-vertical verso il branch handover. La UI Go HTTP e il nuovo canale nativo Python sono percorsi distinti. Il manifest 0.2.0 non carica il vecchio content.js. La presenza di un metodo MCP nel sorgente non prova che main avvii quel trasporto.
-
-## Preservazione
-
-Copie e backup sono riepilogati in [RESUME](RESUME.md). Non toccare A:, stash, branch di recupero o VPS per far apparire tutto allineato. Un aggiornamento GitHub non aggiorna Windows o binari installati.
-
-Procedere per tranche coerenti, controllare contenuti pubblicati e CI; fermarsi ai gate obbligatori con destinazione e contenuto esatti. Nessun merge, deploy, force push, cancellazione o pubblicazione implicita. [Prossimi passi](NEXT_STEPS.md).
+Preservare copie, stash, branch di recupero e VPS. Un commit GitHub non aggiorna Windows, runtime installati o Drive. Nessun reset distruttivo, force push, cancellazione, merge o deploy implicito. Fermarsi alle approvazioni specifiche con target e contenuto esatti.

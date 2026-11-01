@@ -1,76 +1,34 @@
-# OmniNode — ripresa operativa verificata
+# Ripresa operativa e copie da preservare
 
-Aggiornamento: 16 ottobre 2026, circa 02:37 CEST. Leggere questo file prima dei riepiloghi storici. Non costituisce certificazione di produzione.
+Aggiornamento: 1 novembre 2026, sessione fino alle 03:21 CET. [Handover da zero](docs/ZERO_CONTEXT_HANDOVER.md) e [stato corrente](docs/CURRENT_STATUS.md) prevalgono sulle descrizioni operative storiche. I dettagli di backup sotto sono da preservare, non inviti a fare restore.
 
-## Missione
+## GitHub e prove
 
-OmniNode collega le IA nelle rispettive chat web al browser e agli strumenti autorizzati locali/remoti, restituendo i risultati nella stessa conversazione. Non è un nuovo chatbot o un agente sostitutivo. La console PWA è accessoria. Obiettivo immediato: una chat reale → richiesta strutturata → core locale → creazione autorizzata di un file nuovo → risultato alla stessa chat, senza trasporto manuale di comandi.
+Repository ZooL-OhKi/omninode, branch feature/bridge-gemini-vertical, PR #9 aperta verso ai-handover-20261015-worker2. Base handover 86fe9f2ab8805cd850bf60811de10fb813012cd5; codice/CI verificato 9316f6b2eecb252ffe7c7447549bd91a36b91a0f, 11 check success. Rileggere HEAD dopo ogni commit. Il recupero PR #8 e consolidato sul branch handover, non su main.
 
-## Repository e branch
+Il ritorno testuale e quello immagine sono stati osservati nella chat Gemini con conferme locali; e2e-image-006 e riuscito. Non attribuire all'assistente accesso fisico al PC o un contatto autonomo con Gemini. Nessun deploy e provato da questa sessione.
 
-Repository ZooL-OhKi/omninode.
-- Branch di recupero: local-work-20261016-005605.
-- PR #8 verso ai-handover-20261015-worker2: https://github.com/ZooL-OhKi/omninode/pull/8
-- Baseline documentale handover: fa410777c531005329127215f96f56d743111067, con START_HERE.md sul branch ai-handover-20261015-worker2.
-- Questo branch di recupero non contiene necessariamente START_HERE.md: questo RESUME.md è autonomo. Non cambiare branch con lavoro locale non salvato solo per leggerlo.
-- Ultimo commit di codice verificato in CI: 8ba3218d825b287d707216009006f3107cab979f. Il presente commit documentale sarà successivo: ricavare lo SHA reale con Git.
-- Nessun merge su main e nessun deploy effettuato durante queste correzioni.
+## Copie e backup
 
-## Lavoro recuperato e correzioni pubblicate
+- Windows attiva: C:\Users\ugopl\omninode-github. Il vecchio SHA locale esplicitamente annotato ae21a159864689126ea7aa7e089fef536d72031d e storico, non certifica lo SHA attuale.
+- Backup verificato dall'utente: C:\Users\ugopl\omninode-github-backup-20261016-005605, 186 file e zero fallimenti Robocopy nella prova storica.
+- Copia storica: A:\omninode; backup A:\omninode-backup-20261015-223838.
+- Copia A: coinvolta nell'ultimo tentativo: A:\omninode-clean-20261101-011658. Ha segnalato desktop.ini in .git/refs; riparazione e allineamento non confermati.
+- Branch da preservare: local-work-20261016-005605 e backup/windows-before-sync-20261015-224242.
+- Stash da cercare tramite messaggio Windows prima allineamento 20261015-224242, non mediante indice fisso.
 
-26fcde2: salvataggio locale di gateway/MQTT/CI, UI Go/PWA, test e idempotency.go.
-80a0b7c: formattazione Go.
-e0c8cf7823b1af2f0449966e7631902d4ac7f123: rollback workspace con rilascio mutex garantito da defer e due test.
-0c518e6ecbbe61c8810e5808f42245ecc7e40bb8: workflow Recovery Validation.
-8ba3218d825b287d707216009006f3107cab979f: import task_store mancante, cleanup lifecycle con try/finally, terminatore SSE corretto e due test.
+Non uniformare queste storie con reset, force push o cancellazioni. GoogleDriveFS aveva un handle sulla copia A:. Non chiudere processi, smontare volumi, modificare permessi o cancellare oggetti Git alla cieca. Evitare la sincronizzazione diretta di .git con Drive; preferire snapshot versionati senza metadati Git.
 
-## Evidenze di test
+## Ultimo tentativo di allineamento
 
-Output terminale utente precedente alle ultime correzioni: 21 test Go passati; Python 122 passed, 2 skipped. Non attribuire tali conteggi ai commit successivi.
+Il primo allegato PowerShell ha fallito il parsing alle 03:18 CET: stringa con $repo: invece di ${repo}:. Il blocco non e stato eseguito. E stato rimandato il file corretto; non e arrivato un output che provi la sua esecuzione.
 
-Verifica GitHub effettuata alle circa 02:37 CEST: job go e python entrambi success in ciascuna delle due esecuzioni sul nuovo codice:
-- https://github.com/ZooL-OhKi/omninode/actions/runs/38830216337
-- https://github.com/ZooL-OhKi/omninode/actions/runs/38830221263
+Lo script proposto controllava modifiche e branch, faceva backup metadata locale prima di quarantena dei soli desktop.ini riconosciuti come Windows, verificava fsck e consentiva solo fast-forward. Esportava ZIP e JSON con SHA256, lasciando drive_upload_verified=false. Queste sono intenzioni del file, non operazioni gia attestate; non e stato eseguito/testato qui con PowerShell Windows. Non e versionato nel repository.
 
-Il job Go esegue mod verify, vet, test -race e build. Il job Python installa requirements, pytest-asyncio, Playwright/Chromium, compila ed esegue pytest. I due run derivano dai trigger push e pull_request. Success dei job non prova una demo reale con chat web, sicurezza completa o segreti assenti.
+Il target fissato era 9316f6b2eecb252ffe7c7447549bd91a36b91a0f. Nuovi commit rendono vecchio quel riferimento: non aggirare l'arresto sul remoto avanzato. Per un nuovo allineamento verificare prima HEAD e CI, preservare i recuperi e ottenere le approvazioni richieste. Un commit documentale non aggiorna automaticamente copie locali o host installati. Non dichiarare sincronizzato Drive senza verificare artefatti e hash. Non pubblicare backup .git o log console.
 
-## Cosa NON è implementato o validato
+## VPS: storia, non salute corrente
 
-- La directory omniclient/extension non compare nell’elenco remoto esaminato.
-- ui_server.go non registra /api/bridge/execute: contiene UI e proxy verso /mcp.
-- Nessuna verticale chat web → estensione → Go → chat verificata.
-- Endpoint UI di scrittura senza verifica del chiamante/sessione: non esporli in rete o tramite tunnel.
-- workspace.write usa os.WriteFile: permette sovrascrittura. Il vincolo solo file nuovi non è implementato in quel percorso.
-- Controllo percorsi lessicale: non considerarlo prova di confinamento contro symlink o reparse point.
-- WorkspaceHandler ha un registro persistente separato da LocalIdempotencyStore: non introdurre un terzo registro. Registra gli ID prima dell’effetto; rimane una finestra di crash. Non confronta impronta del payload né restituisce risultato originale.
-- idempotency.go presente non dimostra che sia usato nel flusso operativo.
-- UI index usa innerHTML per cronologia con campi controllabili e uno script CDN esterno: hardening da completare.
-- Scansione Advanced Security non eseguibile tramite connettore perché non abilitata. La precedente scansione mirata NON copriva tutti i file: non dichiarare la repository priva di segreti.
+Orchestratore omninode-orchestrator; archivista omninode-archivista-vcn. Le sorgenti /home/ubuntu/omninode erano state allineate dall'utente a 86fe9f2. Archivista esegue /opt/omninode/omniclient/omniclient con WorkingDirectory /opt/omninode/omniclient: un pull altrove non aggiorna quel binario. Non assumere accesso SSH, stato dei servizi o certificati validi. Nessun deploy o riavvio e provato da questa manutenzione.
 
-## Copie locali e backup
-
-Windows di lavoro: C:\Users\ugopl\omninode-github.
-Backup verificato dall’output utente: C:\Users\ugopl\omninode-github-backup-20261016-005605, 186 file, zero fallimenti.
-Ultimo stato locale mostrato: pulito e sincronizzato prima dei commit remoti e0c8cf7, 0c518e6 e 8ba3218. Non dichiarare Windows aggiornato agli ultimi commit.
-
-Copia storica A:\omninode: blocchi GoogleDriveFS, backup A:\omninode-backup-20261015-223838, branch backup/windows-before-sync-20261015-224242 e stash con messaggio Windows prima allineamento 20261015-224242. Non cancellare, rinominare o pulire alla cieca. Identificare lo stash dal messaggio/SHA, non assumere indice immutato.
-
-VPS: sorgenti storicamente osservati a 2a07fda in /home/ubuntu/omninode. Archivista esegue /opt/omninode/omniclient/omniclient: aggiornare sorgenti non aggiorna quel binario. Stato live attuale non ricontrollato, nessun rollout.
-
-## Copilot
-
-Non è un prerequisito. Account mostrato su Copilot Free, reviewer non selezionabile; richieste del connettore senza errore non hanno provato l’ingaggio. Non attendere Copilot e non acquistare abbonamenti per continuare. Non dichiarare collaborazione con Gemini se non esiste una comunicazione reale.
-
-## Prompt di avvio per la prossima IA
-
-Sei il co-sviluppatore che riprende OmniNode senza conoscere la chat precedente. Leggi RESUME.md, poi AGENTS.md e le policy della repository. Le affermazioni storiche non sostituiscono la lettura del codice. La missione è l’estensione operativa delle IA web, non un nuovo chatbot.
-
-Verifica branch, SHA, diff, working tree e check CI. Preserva lavoro locale e backup. Non rifare roadmap o audit generali. Correggi prima le protezioni del percorso che userà il bridge: autenticazione/sessione, loopback, limiti delle richieste, workspace confinato anche rispetto ai link, creazione esclusiva, conflitto stesso ID/payload diverso e semantica di crash esplicita. Aggiungi test negativi mirati. Poi implementa il bridge e l’estensione mancanti con attivazione esplicita sulla sola scheda/conversazione scelta.
-
-Non eseguire blocchi durante streaming, esempi citati o cronologia preesistente. Non inserire token nel DOM/prompt. Rifiuta formati sconosciuti; prevedi stop visibile e timeout. Non sovrascrivere testo dell’utente durante il ritorno alla chat. Distinguere mock backend da verticale con chat reale.
-
-Usa strumenti autorizzati per letture e test; non chiedere all’utente operazioni eseguibili da te. Se manca accesso al PC/browser, dichiaralo e separa implementazione remota da validazione locale. Non esistono attività in background implicite.
-
-Conserva mTLS, TLS/ACL e policy esistenti; niente shell arbitraria, segreti, esposizione di rete, force push, reset distruttivi o deploy. Per scritture esterne rispetta il gate di conferma dello strumento; autorizzazione generale non lo elimina. Nessun merge di componenti non verificati solo per dichiarare tutto allineato.
-
-Consegna finale con commit reali, test realmente eseguiti, stato di ciascuna copia e blocchi residui. Non dichiarare completata la verticale se non è avvenuto il ritorno automatico nella chat reale.
+Il report omniclient/local-verification-report.txt e evidenza storica del 15 ottobre, non un test corrente. Copilot non e una dipendenza. Conservare AGENTS.md e SECURITY.md come regole operative.

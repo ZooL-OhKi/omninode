@@ -1,10 +1,13 @@
 package main
 
 import (
+	"crypto/tls"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 )
 
@@ -88,20 +91,40 @@ func main() {
 	agentID := requiredEnv("OMNINODE_AGENT_ID")
 	username := requiredEnv("OMNINODE_MQTT_USER")
 	password := requiredEnv("OMNINODE_MQTT_PASS")
-	caPath := requiredEnv("OMNINODE_MQTT_CA_PATH")
-	certPath := requiredEnv("OMNINODE_MQTT_CERT_PATH")
-	keyPath := requiredEnv("OMNINODE_MQTT_KEY_PATH")
 	serverName := os.Getenv("OMNINODE_MQTT_SERVER_NAME")
 	workspaceRoot := requiredEnv("OMNINODE_WORKSPACE_ROOT")
+
+	parsedBrokerURL, err := url.Parse(brokerURL)
+	if err != nil {
+		log.Fatalf("[OmniClient] URL broker non valido: %v", err)
+	}
+
+	var tlsConfig *tls.Config
+
+	switch strings.ToLower(parsedBrokerURL.Scheme) {
+	case "mqtt", "tcp":
+		tlsConfig = nil
+
+	case "ssl", "tls", "mqtts", "mqtt+ssl", "tcps":
+		caPath := requiredEnv("OMNINODE_MQTT_CA_PATH")
+		certPath := requiredEnv("OMNINODE_MQTT_CERT_PATH")
+		keyPath := requiredEnv("OMNINODE_MQTT_KEY_PATH")
+
+		tlsConfig, err = buildTLSConfig(caPath, certPath, keyPath, serverName)
+		if err != nil {
+			log.Fatalf("[OmniClient] configurazione mTLS non valida: %v", err)
+		}
+
+	default:
+		log.Fatalf("[OmniClient] schema broker non supportato: %q; usa mqtt:// oppure tcp:// per TLS disattivato, oppure mqtts://, ssl://, tls://, mqtt+ssl:// oppure tcps:// per mTLS", parsedBrokerURL.Scheme)
+	}
 
 	client, err := StartMQTTWorker(WorkerConfig{
 		BrokerURL:     brokerURL,
 		ClientID:      nodeID,
 		Username:      username,
 		Password:      password,
-		CACertPath:    caPath,
-		CertPath:      certPath,
-		KeyPath:       keyPath,
+		TLSConfig:     tlsConfig,
 		ServerName:    serverName,
 		NodeID:        nodeID,
 		WorkspaceRoot: workspaceRoot,

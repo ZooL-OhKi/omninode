@@ -87,14 +87,25 @@ const OmniPerplexityDelivery=(()=>{
   if(!sendReady({fileAssigned,previewReady:finalList.length===1&&finalList[0]===preview&&JSON.stringify([source(preview),preview.naturalWidth,preview.naturalHeight])===signature,loading:loading(),alert:alerts(),buttonReady:finalButtons.length===1&&finalButtons[0]===send}))fail('ATTACHMENT_CHANGED');
   // One attempt only. An uncertain outcome must never trigger another click.
   send.click();show('OmniNode: invio richiesto; verifica messaggio con allegato.');
+  let lastDiag='NO_OBSERVATION';
   for(let i=0;i<100;i++){
-   await sleep(100);guard();
-   const outgoing=[...doc.querySelectorAll('[class~="group/user-bubble"]')].filter(x=>!before.has(x)&&[x,...x.querySelectorAll('*')].some(y=>y.textContent.trim()===text));
-   if(outgoing.length!==1||read(editor))continue;
-   const attached=[...outgoing[0].querySelectorAll('img')].filter(x=>visible(x)&&x.complete&&x.naturalWidth>0);
-   if(attached.length===1)return {state:'SENT_WITH_ATTACHMENT_OBSERVED',request_id:id};
+   await sleep(100);
+   if(!isActive())fail('SEND_UNCERTAIN_HALT_NO_RETRY:req='+id+':phase=post_click:SESSION_CHANGED');
+   const bubbles=[...doc.querySelectorAll('[class~="group/user-bubble"]')].filter(x=>!before.has(x));
+   const outgoing=bubbles.filter(x=>[x,...x.querySelectorAll('*')].some(y=>y.textContent.trim()===text));
+   if(outgoing.length!==1){lastDiag=bubbles.length===0?'NO_NEW_BUBBLE':outgoing.length===0?'JSON_NOT_CORRELATED':'MULTIPLE_CORRELATED_BUBBLES';continue;}
+   const currentEditors=[...doc.querySelectorAll('[contenteditable="true"][role="textbox"]')].filter(visible);
+   if(currentEditors.length!==1){lastDiag='COMPOSER_COUNT_'+currentEditors.length;continue;}
+   if(editor.isConnected&&currentEditors[0]!==editor){lastDiag='COMPOSER_IDENTITY_AMBIGUOUS';continue;}
+   if(read(currentEditors[0])){lastDiag=editor.isConnected?'COMPOSER_NOT_EMPTY':'REPLACEMENT_NOT_EMPTY';continue;}
+   const attached=[...outgoing[0].querySelectorAll('img')];
+   if(attached.length!==1){lastDiag='ATTACHMENT_COUNT_'+attached.length;continue;}
+   const img=attached[0];
+   if(!visible(img)){lastDiag='ATTACHMENT_NOT_VISIBLE';continue;}
+   if(!img.complete||img.naturalWidth<=0||img.naturalHeight<=0){lastDiag='ATTACHMENT_NOT_LOADED';continue;}
+   return {state:'SENT_WITH_ATTACHMENT_OBSERVED',request_id:id};
   }
-  fail('SEND_UNCERTAIN_HALT_NO_RETRY');
+  fail('SEND_UNCERTAIN_HALT_NO_RETRY:req='+id+':phase=post_click:'+lastDiag);
  }
  return {accepts,deliver,insertVerified,imageBaseline,previewCandidates,sendReady,makeResultText};
 })();

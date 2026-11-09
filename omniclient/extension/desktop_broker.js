@@ -10,7 +10,7 @@ class OmniDesktopBroker {
     this.tokenFactory=options.tokenFactory??(()=>{const b=new Uint8Array(32);globalThis.crypto.getRandomValues(b);return Array.from(b,x=>x.toString(16).padStart(2,"0")).join("");});
   }
   trusted(s){return s?.id===this.api.runtime.id;}
-  stop(){this.epoch++;if(this.session){this.session.state="STOPPED";clearTimeout(this.session.timer);}this.session=null;this.owner=null;this.activation=null;this.opening=false;this.requests=new Map();this.helpers.clear();this.client.stop();this.api.action.setBadgeText({text:""});}
+  stop(){this.epoch++;if(this.session){this.session.state="STOPPED";clearTimeout(this.session.timer);}this.session=null;this.owner=null;this.activation=null;this.opening=false;this.requests=new Map();this.helpers.clear();this.client.stop("Desktop session stopped; input is not retried");this.api.action.setBadgeText({text:""});}
   changed(id,url){if(this.owner?.tabId!==id)return;try{if(omniConversation(url)===this.owner.conversation)return;}catch{}this.stop();}
   isCurrent(s){if(!s||this.session!==s||s.epoch!==this.epoch||s.state!=="ACTIVE")return false;if(Date.now()>=s.expiresAt||this.client.session!==s.nativeSession){this.stop();return false;}return true;}
   _assertActiveBridge(sender,m,bind=false){

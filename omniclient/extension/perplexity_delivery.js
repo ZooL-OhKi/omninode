@@ -98,7 +98,12 @@ const OmniPerplexityDelivery=(()=>{
    if(currentEditors.length!==1){lastDiag='COMPOSER_COUNT_'+currentEditors.length;continue;}
    if(editor.isConnected&&currentEditors[0]!==editor){lastDiag='COMPOSER_IDENTITY_AMBIGUOUS';continue;}
    if(read(currentEditors[0])){lastDiag=editor.isConnected?'COMPOSER_NOT_EMPTY':'REPLACEMENT_NOT_EMPTY';continue;}
-   const attached=[...outgoing[0].querySelectorAll('img')];
+   const bubble=outgoing[0], message=bubble.parentElement;
+   const parts=message?[...message.children]:[];
+   const bubbleSelector='[class~="group/user-bubble"]';
+   const layoutOk=Boolean(message&&message.isConnected&&message.classList.contains('flex-col')&&parts.length===2&&parts[1]===bubble&&parts[0].classList.contains('flex-wrap')&&message.querySelectorAll(bubbleSelector).length===1&&message.querySelectorAll('[data-workflow-final-text],[contenteditable="true"]').length===0&&parts[0].querySelectorAll(bubbleSelector).length===0);
+   if(!layoutOk){lastDiag='MESSAGE_ATTACHMENT_LAYOUT_UNVERIFIED';continue;}
+   const attached=[...parts[0].querySelectorAll('img')];
    if(attached.length!==1){lastDiag='ATTACHMENT_COUNT_'+attached.length;continue;}
    const img=attached[0];
    if(!visible(img)){lastDiag='ATTACHMENT_NOT_VISIBLE';continue;}

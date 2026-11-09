@@ -1,0 +1,64 @@
+name: Desktop primitive validation
+
+on:
+  push:
+    paths:
+      - 'desktop/**'
+      - '.github/workflows/desktop-validation.yml'
+  pull_request:
+    paths:
+      - 'desktop/**'
+      - '.github/workflows/desktop-validation.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  unit-tests:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install image test dependency in disposable runner
+        run: python -m pip install --disable-pip-version-check Pillow==12.3.0
+      - name: Validate syntax
+        run: python -m compileall -q desktop
+      - name: Test desktop policy and native protocol with fake backends
+        working-directory: desktop
+        run: python -m unittest discover -v
+  native-browser:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install verified synthetic fixture dependencies
+        run: python -m pip install --disable-pip-version-check Pillow==12.2.0 playwright==1.51.0
+      - name: Install Chromium for isolated synthetic fixture only
+        run: python -m playwright install --with-deps chromium
+      - name: Exercise real native messaging with synthetic image host
+        working-directory: desktop
+        env:
+          OMNINODE_BROWSER_INTEGRATION: '1'
+        run: python -m unittest -v test_native_browser
+  native-windows-setup:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install in temp venv and verify real launcher without desktop access
+        working-directory: desktop
+        env:
+          OMNINODE_WINDOWS_SETUP_TEST: '1'
+        run: python -m unittest -v test_windows_native_setup

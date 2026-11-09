@@ -27,7 +27,27 @@ func startOptionalUIServer() *http.Server {
 	}
 	mcpSecret := os.Getenv("MCP_SECRET")
 
-	handler, err := NewUIHandler(gatewayURL, mcpSecret)
+	var bridge *BridgeService
+	workspaceRoot := os.Getenv("OMNINODE_WORKSPACE_ROOT")
+	bridgeToken := os.Getenv("OMNINODE_BRIDGE_TOKEN")
+	if workspaceRoot != "" && bridgeToken != "" {
+		if err := os.MkdirAll(workspaceRoot, 0o750); err != nil {
+			log.Fatalf("[OmniClient] impossibile creare il workspace root %s: %v", workspaceRoot, err)
+		}
+		workspace := NewWorkspaceHandler(workspaceRoot)
+		allowedOrigin := os.Getenv("OMNINODE_ALLOWED_ORIGIN")
+		if allowedOrigin == "" {
+			allowedOrigin = "http://" + uiAddr
+		}
+		var err error
+		bridge, err = NewBridgeService(workspace, bridgeToken, allowedOrigin)
+		if err != nil {
+			log.Fatalf("[OmniClient] bridge non avviabile: %v", err)
+		}
+		log.Printf("[OmniClient] bridge locale attivo su /api/bridge/execute (workspace: %s)", workspaceRoot)
+	}
+
+	handler, err := NewUIHandler(gatewayURL, mcpSecret, bridge)
 	if err != nil {
 		log.Fatalf("[OmniClient] impossibile inizializzare UI server: %v", err)
 	}
@@ -50,7 +70,6 @@ func main() {
 	signals := make(chan os.Signal, 1)
 	signal.Notify(signals, syscall.SIGINT, syscall.SIGTERM)
 
-	// Modalita Standalone Web UI / PWA (per Custom Browser, Mobile e Cloudflare Tunnel)
 	if os.Getenv("UI_ONLY") == "1" {
 		if os.Getenv("UI_LISTEN_ADDR") == "" {
 			_ = os.Setenv("UI_LISTEN_ADDR", "127.0.0.1:8080")

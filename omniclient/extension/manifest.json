@@ -1,0 +1,32 @@
+{
+  "manifest_version": 3,
+  "name": "OmniNode Bridge",
+  "version": "0.3.1",
+  "description": "Compito Blocco note con autorizzazione unica e ritorno automatico verificato nella chat.",
+  "permissions": [
+    "activeTab",
+    "tabs",
+    "nativeMessaging"
+  ],
+  "background": {
+    "service_worker": "service_worker.js"
+  },
+  "action": {
+    "default_title": "OmniNode Desktop",
+    "default_popup": "desktop.html"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://gemini.google.com/*"
+      ],
+      "js": [
+        "action_policy.js",
+        "task_delivery.js",
+        "text_delivery.js",
+        "content.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ]
+}

@@ -86,6 +86,10 @@ func main() {
 	log.Println("[OmniClient] avvio worker OmniNode")
 	startOptionalUIServer()
 
+	if err := InitWebAgent(); err != nil {
+		log.Printf("[OmniClient] browser agent ONAP non disponibile: %v", err)
+	}
+
 	brokerURL := requiredEnv("OMNINODE_MQTT_BROKER")
 	nodeID := requiredEnv("OMNINODE_NODE_ID")
 	agentID := requiredEnv("OMNINODE_AGENT_ID")

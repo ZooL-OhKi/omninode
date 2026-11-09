@@ -2,7 +2,7 @@
  'use strict';
  if(globalThis.__omniPerplexityAdapter)return;
  globalThis.__omniPerplexityAdapter=true;
- let session=null,busy=false;
+ let session=null,busy=false,deliveryHalted=false;
  const seen=new Set(),historical=new Set(),pending=new WeakSet();
  const selector='[data-workflow-final-text]';
  const current=()=>location.origin+location.pathname;
@@ -15,24 +15,6 @@
  shadow.append(label);document.documentElement.append(host);
  const show=t=>{label.textContent=t;};
  const signature=p=>p.textContent;
- async function deliver(text,s){
-  if(!active(s))return false;
-  const composers=Array.from(document.querySelectorAll('[contenteditable="true"][role="textbox"]')).filter(x=>x.getClientRects().length);
-  if(composers.length!==1)return false;
-  const c=composers[0];if(c.textContent.trim()||c.querySelector('img'))return false;
-  c.focus();if(!document.execCommand('insertText',false,text))return false;
-  for(let i=0;i<20;i++){
-   if(!active(s)||c.textContent.trim()!==text)return false;
-   const buttons=Array.from(document.querySelectorAll('button[aria-label="Invia"]')).filter(x=>x.getClientRects().length&&!x.disabled);
-   if(buttons.length===1){
-    buttons[0].click();
-    for(let j=0;j<30;j++){await sleep(100);if(!active(s))return false;if(!c.textContent.trim())return true;}
-    return false;
-   }
-   await sleep(100);
-  }
-  return false;
- }
  async function process(p,s){
   if(pending.has(p))return;pending.add(p);
   let last='',stable=0;
@@ -42,33 +24,32 @@
    if(omniIsCompleted(p)&&stable>=3)break;
    if(i===119){show('OmniNode: completamento non confermato; nessuna azione.');return;}
   }
-  if(!active(s)||historical.has(signature(p)))return;
+  if(!active(s)||historical.has(signature(p))||deliveryHalted)return;
   const command=omniParseCommand(omniExtractResponseText(p),globalThis.OmniActionPolicy);
   if(!command||seen.has(command.request_id))return;
   if(busy){show('OmniNode: richiesta concorrente ignorata.');return;}
-  if(seen.size>=500){session=null;show('OmniNode: limite richieste raggiunto.');return;}
+  if(seen.size>=500){session=null;chrome.runtime.sendMessage({type:'desktop-stop'}).catch(()=>{});show('OmniNode: limite richieste raggiunto.');return;}
   seen.add(command.request_id);busy=true;
   try{
    const response=await chrome.runtime.sendMessage({type:'ai-bridge-request',activation_id:s.activation_id,request_id:command.request_id,issued_at:Date.now(),stream_state:'settled',payload:{action:command.action,args:command.args}});
    if(!active(s))return;
    if(response?.ok!==true||response.request_id!==command.request_id||response.activation_id!==s.activation_id)throw Error(response?.code||'RESULT_CORRELATION_FAILED');
-   const text=omniBuildResultMessage(command,response);
-   show('OmniNode: screenshot ricevuto; immagine non allegata.');
-   const sent=await deliver(text,s);
-   if(active(s))show(sent?'OmniNode: conferma testuale inviata; immagine non allegata.':'OmniNode: screenshot ricevuto; consegna non confermata, nessun retry.');
-  }catch(e){if(active(s))show('OmniNode: '+e.message+'; nessun retry.');}
+   omniBuildResultMessage(command,response);
+   const result=await OmniPerplexityDelivery.deliver({image:response.result,id:command.request_id,isActive:()=>active(s),show});
+   if(active(s)&&result.state==='SENT_WITH_ATTACHMENT_OBSERVED')show('OmniNode: messaggio uscente con immagine osservato; attesa risposta assistente.');
+  }catch(e){deliveryHalted=true;if(active(s))show('OmniNode: '+e.message+'; canale in pausa, nessun retry.');}
   finally{busy=false;}
  }
- const observer=new MutationObserver(()=>{const s=session;if(active(s))document.querySelectorAll(selector).forEach(p=>process(p,s));});
+ const observer=new MutationObserver(()=>{const s=session;if(active(s)&&!deliveryHalted)document.querySelectorAll(selector).forEach(p=>process(p,s));});
  chrome.runtime.onMessage.addListener((m,sender,reply)=>{
   if(m?.type!=='omninode-activation')return false;
   if(sender.id!==chrome.runtime.id||!/^[a-f0-9]{64}$/.test(m.activation_id||'')||!Number.isSafeInteger(m.expires_at)||m.expires_at<=Date.now()||m.conversation!==current()){reply({ok:false});return false;}
-  observer.disconnect();session=m;
+  observer.disconnect();session=m;deliveryHalted=false;
   document.querySelectorAll(selector).forEach(p=>{pending.add(p);historical.add(signature(p));});
   chrome.runtime.sendMessage({type:'bridge-bind',activation_id:m.activation_id}).then(r=>{
-   if(!active(m)||r?.ok!==true||r.activation_id!==m.activation_id){reply({ok:false});return;}
+   if(!active(m)||r?.ok!==true||r.activation_id!==m.activation_id){if(session===m)session=null;reply({ok:false});return;}
    observer.observe(document.body,{childList:true,subtree:true,characterData:true});
-   show('OmniNode: collegato; screenshot dalle nuove risposte. Immagine non allegata alla chat.');reply({ok:true});
+   show('OmniNode: collegato; consegna screenshot con verifica allegato abilitata.');reply({ok:true});
   }).catch(()=>{if(session===m)session=null;reply({ok:false});});return true;
  });
  setInterval(()=>{if(session&&!active(session)){session=null;observer.disconnect();show('OmniNode: sessione terminata.');chrome.runtime.sendMessage({type:'desktop-stop'}).catch(()=>{});}},500);

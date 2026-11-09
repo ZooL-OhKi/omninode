@@ -44,11 +44,6 @@ class WindowsInputBackend:
     def valid_key(self, key):
         return isinstance(key, str) and key in self.raw.KEYBOARD_KEYS
 
-    def display_topology(self):
-        if self.native:
-            return self.native.display_topology()
-        raise RuntimeError("display topology unavailable")
-
     def _release(self, items):
         active_error = sys.exc_info()[0] is not None
         errors = []
@@ -73,7 +68,8 @@ class WindowsInputBackend:
             if self.target is None:
                 raise PermissionError("select target with an explicitly confirmed click first")
             self.native.focus(self.target)
-            self.native.await_ready(self.target)
+            if hasattr(self.native, "await_ready"):
+                self.native.await_ready(self.target)
         check()
 
     def _guard(self, check):
@@ -257,9 +253,6 @@ def make_windows_backend():
     user.GetWindowRect.restype = w.BOOL
     user.SendMessageTimeoutW.argtypes = [w.HWND, w.UINT, w.WPARAM, w.LPARAM, w.UINT, w.UINT, ctypes.POINTER(w.DWORD_PTR)]
     user.SendMessageTimeoutW.restype = w.BOOL
-    user.GetSystemMetrics.argtypes = [w.INT]
-    user.GetSystemMetrics.restype = w.INT
-    user.GetDpiForSystem.restype = w.UINT
 
     class Native:
         def emit(self, entries):
@@ -347,25 +340,6 @@ def make_windows_backend():
                 last = state
                 time.sleep(0.025)
             raise PermissionError("target not stable; no input delivered")
-
-        def display_topology(self):
-            x = user.GetSystemMetrics(76)
-            y = user.GetSystemMetrics(77)
-            width = user.GetSystemMetrics(78)
-            height = user.GetSystemMetrics(79)
-            dpi = int(user.GetDpiForSystem())
-            if width < 1 or height < 1 or dpi < 1:
-                raise RuntimeError("display topology unavailable")
-            return {
-                "monitor_id": 0,
-                "virtual_screen_origin_x": int(x),
-                "virtual_screen_origin_y": int(y),
-                "physical_width": int(width),
-                "physical_height": int(height),
-                "dpi_x": dpi,
-                "dpi_y": dpi,
-                "scale_factor": dpi / 96.0,
-            }
 
         def release(self, kind, value):
             if kind == "mouse":

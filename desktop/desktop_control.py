@@ -34,6 +34,8 @@ class DesktopSession:
     def _check(self, token, conversation):
         if (self._stop.is_set() or self._clock() >= self._expires
                 or not isinstance(token, str)
+                or not isinstance(conversation, str)
+                or conversation != self._conversation
                 or not hmac.compare_digest(token.encode(), self._token.encode())):
             raise PermissionError("desktop grant absent, expired, stopped, or mismatched")
 

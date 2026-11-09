@@ -1,32 +1,24 @@
 "use strict";
-function omniIsCompleted(partition) {
-  return Boolean(partition && typeof partition.querySelector === "function" && partition.querySelector('div[title="Completato"]'));
+function omniIsCompleted(p) { return Boolean(p?.querySelector('div[title="Completato"]')); }
+function omniExtractResponseText(p) {
+ const prose=p?.querySelector('.prose');
+ if(!prose)return '';
+ const blocks=Array.from(prose.querySelectorAll('pre')).filter(x=>!x.closest('blockquote'));
+ if(blocks.length!==1)return '';
+ return (blocks[0].querySelector('code')||blocks[0]).textContent.trim();
 }
-function omniExtractResponseText(partition) {
-  if (!partition || typeof partition.querySelector !== "function") return "";
-  const prose = partition.querySelector(".prose");
-  return prose ? (prose.textContent || "").trim() : "";
+function omniParseCommand(text,policy) {
+ if(typeof text!=='string'||text.length>8192)return null;
+ const fenced=text.match(/^```json\s*([\s\S]*?)```$/i);
+ let p;try{p=JSON.parse(fenced?fenced[1]:text);}catch{return null;}
+ if(!p||Array.isArray(p)||Object.keys(p).sort().join(',')!=='action,args,request_id')return null;
+ if(p.action!=='screenshot'||!policy?.id(p.request_id)||!p.args||Array.isArray(p.args)||typeof p.args!=='object'||Object.keys(p.args).length)return null;
+ return p;
 }
-function omniParseCommand(text, policy) {
-  if (typeof text !== "string") return null;
-  const match = text.match(/```json\s*([\s\S]*?)```/i);
-  if (!match) return null;
-  let parsed;
-  try { parsed = JSON.parse(match[1]); } catch { return null; }
-  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
-  if (parsed.action !== "screenshot") return null;
-  if (!parsed.args || typeof parsed.args !== "object" || Array.isArray(parsed.args) || Object.keys(parsed.args).length) return null;
-  const id = parsed.request_id;
-  if (typeof id !== "string" || !policy || typeof policy.id !== "function" || !policy.id(id)) return null;
-  return parsed;
+function omniBuildResultMessage(command,response) {
+ const image=response?.result;
+ if(response?.ok!==true||response.request_id!==command.request_id||image?.kind!=='image'||!Number.isSafeInteger(image.width)||!Number.isSafeInteger(image.height)||!image.data_url?.startsWith('data:image/'))throw Error('INVALID_IMAGE_RESULT');
+ return `OmniNode ${command.request_id}: screenshot acquisito (${image.width}x${image.height}). Immagine non allegata alla chat.`;
 }
-function omniBuildResultMessage(command, result) {
-  const image = result && result.result && result.result.result ? result.result.result : null;
-  const dimensions = image && Number.isSafeInteger(image.width) && Number.isSafeInteger(image.height) ? ` (${image.width}x${image.height})` : "";
-  return `OmniNode ${command.request_id}: screenshot acquisito${dimensions}.`;
-}
-if (typeof module !== "undefined" && module.exports) {
-  module.exports = { omniIsCompleted, omniExtractResponseText, omniParseCommand, omniBuildResultMessage };
-} else {
-  Object.assign(globalThis, { omniIsCompleted, omniExtractResponseText, omniParseCommand, omniBuildResultMessage });
-}
+const api={omniIsCompleted,omniExtractResponseText,omniParseCommand,omniBuildResultMessage};
+if(typeof module!=='undefined'&&module.exports)module.exports=api;else Object.assign(globalThis,api);

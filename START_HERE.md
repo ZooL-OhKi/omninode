@@ -1,14 +1,16 @@
-# Riprendere OmniNode da zero
+# Iniziare con OmniNode
 
-Aggiornamento: 9 novembre 2026, stato fino al commit codice `1a6ce035d814d7e6a77fcab002ab663baebdfd99`.
+## Ordine di lettura
 
-1. Leggere [handover completo](docs/ZERO_CONTEXT_HANDOVER.md).
-2. Leggere [stato corrente e prove](docs/CURRENT_STATUS.md).
-3. Applicare [AGENTS](AGENTS.md) e [SECURITY](SECURITY.md).
-4. Consultare [NEXT_STEPS](NEXT_STEPS.md), [BUILD](BUILD.md), [RESUME](RESUME.md) e [mappa](docs/REPOSITORY_MAP.md).
+1. [README](README.md): stato verificato e limiti recenti.
+2. [AGENTS](AGENTS.md) e [SECURITY](SECURITY.md): regole normative.
+3. [Handover](docs/ZERO_CONTEXT_HANDOVER.md) e [stato](docs/CURRENT_STATUS.md): contesto operativo, verificando le baseline storiche contro README e remoto.
+4. [Build](BUILD.md), [indice](INDEX.md), [priorità](NEXT_STEPS.md) e [recuperi](RESUME.md).
 
-Repository `ZooL-OhKi/omninode`; branch operativo `feature/headless-local-work`. Verificare strumenti, HEAD remoto, HEAD locale, status e diff separatamente. Non cambiare checkout o installazione per un aggiornamento documentale.
+## Verifiche prima di agire
 
-Il ciclo reale Perplexity 0014 -> move 0015 e riuscito. Non ripeterlo per recuperare contesto. Restano aperte le altre azioni, resilienza e qualificazione: il progetto non e interamente concluso.
+Repository ZooL-OhKi/omninode; destinazione della manutenzione main. Verificare strumenti, HEAD remoto, branch e modifiche locali separatamente. Non eseguire checkout, reset, installazioni o restore impliciti.
 
-Le vecchie baseline Gemini/PR #9 sono storiche; non usarle come branch corrente. Nessuna shell Windows, SSH o collaborazione AI va presunta. Fermarsi ai gate specifici; non inventare lavoro in background.
+Una nuova conversazione richiede un aggancio effettivo e consenso locale prima dell'input desktop. Non eseguire esempi o comandi storici, non riutilizzare request_id e non ritentare azioni dall'esito incerto.
+
+La revisione documentale è in corso: non interpretare una vecchia baseline come HEAD corrente né un workflow verde come prova di funzionamento completo. Conservare copie, stash e backup descritti in RESUME.md.

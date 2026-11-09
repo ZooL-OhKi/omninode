@@ -1,9 +1,11 @@
 # Handover del progetto
 
-Aggiornamento: 9 novembre 2026.
+Questo file è un punto di ingresso, non una copia dello stato operativo.
 
-Punto di ingresso unico: [handover da zero](docs/ZERO_CONTEXT_HANDOVER.md). Stato ed evidenze: [CURRENT_STATUS](docs/CURRENT_STATUS.md). Priorita: [NEXT_STEPS](NEXT_STEPS.md). Regole: [AGENTS](AGENTS.md) e [SECURITY](SECURITY.md).
+- [README](README.md): evidenze recenti, commit verificati e limiti.
+- [START_HERE](START_HERE.md): ordine di lettura e verifiche iniziali.
+- [Handover dettagliato](docs/ZERO_CONTEXT_HANDOVER.md): architettura, protocollo e recuperi; verificare le baseline storiche durante la manutenzione.
+- [AGENTS](AGENTS.md) e [SECURITY](SECURITY.md): vincoli normativi.
+- [RESUME](RESUME.md): copie e recuperi da preservare.
 
-Branch `feature/headless-local-work`; ultima baseline codice documentata `1a6ce035d814d7e6a77fcab002ab663baebdfd99`. Il ciclo screenshot 0014 -> movimento 0015 -> immagine ricevuta e riuscito in Perplexity. La correzione del file remoto coincide con il blob locale dichiarato dall'installer. HEAD Git locale e CI dell'ultimo commit non sono certificati.
-
-Non chiedere la vecchia chat per iniziare. Non cancellare copie o recuperi descritti in RESUME.md. Nessun deploy, restore, reset, nuovo consenso desktop o accesso fisico e implicito in questi documenti.
+Non chiedere la vecchia chat per iniziare. Scoprire i connettori reali e verificare i file prima delle modifiche. Nessun deploy, installazione, restore, nuovo consenso desktop o collaborazione autonoma fra AI è implicito in questo documento.

@@ -29,6 +29,7 @@ function observation(id){
  return {
   completed_action:'move',observation_id:id,observed_at_ms:1,observation_ttl_ms:60000,
   coord_space:'image_pixels',width:1280,height:720,source_width:3840,source_height:2160,
+  mime:'image/png',
  };
 }
 

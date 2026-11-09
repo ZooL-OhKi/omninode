@@ -5,6 +5,7 @@ const OmniPerplexityDelivery=(()=>{
  const source=x=>x.currentSrc||x.src||'';
  function imageBaseline(doc){return new Set([...doc.querySelectorAll('img')].map(source).filter(Boolean));}
  function previewCandidates(doc,baseline){return [...doc.querySelectorAll('img')].filter(x=>visible(x)&&x.complete&&x.naturalWidth>0&&x.naturalHeight>0&&source(x)&&!baseline.has(source(x))&&!x.closest('[data-workflow-final-text],[class~="group/user-bubble"]'));}
+ function sendReady({fileAssigned,previewReady,loading,alert,buttonReady}){return fileAssigned===true&&previewReady===true&&loading===false&&alert===false&&buttonReady===true;}
  async function insertVerified(editor,text,isActive,doc,options={}){
   const wait=options.wait|| (ms=>new Promise(r=>setTimeout(r,ms)));
   const guard=()=>{if(!isActive())throw Error('INSERT_SESSION_CHANGED');if(!editor.isConnected)throw Error('INSERT_EDITOR_REPLACED');};
@@ -56,32 +57,30 @@ const OmniPerplexityDelivery=(()=>{
   const baseline=imageBaseline(doc);
   const transfer=new DataTransfer();transfer.items.add(file);
   input.files=transfer.files;
-  if(input.files.length!==1||input.files[0].name!==file.name)fail('FILE_ASSIGNMENT_FAILED');
-  show('OmniNode: caricamento screenshot; verifica anteprima nella pagina.');
+  const fileAssigned=input.files.length===1&&input.files[0].name===file.name&&input.files[0].size===file.size&&input.files[0].type===file.type;
+  if(!fileAssigned)fail('FILE_ASSIGNMENT_FAILED');
+  show('OmniNode: caricamento screenshot; attesa anteprima e prontezza invio.');
   input.dispatchEvent(new Event('change',{bubbles:true,composed:true}));
-  let preview=null,signature='',stable=0,candidateCount=0;
+  let preview=null,send=null,signature='',stable=0,candidateCount=0;
+  const readyButtons=()=>[...scope.querySelectorAll('button[aria-label="Invia"]')].filter(x=>visible(x)&&!x.disabled&&x.getAttribute('aria-disabled')!=='true'&&doc.defaultView.getComputedStyle(x).pointerEvents!=='none');
+  // This is local UI readiness, not proof of HTTP upload completion.
   for(let i=0;i<300;i++){
    await sleep(100);intact();if(alerts())fail('UPLOAD_ALERT');
    const list=previewCandidates(doc,baseline);candidateCount=list.length;
-   const img=list.length===1?list[0]:null;
-   const next=img&&!loading()?JSON.stringify([source(img),img.naturalWidth,img.naturalHeight]):'';
-   stable=next&&next===signature?stable+1:0;signature=next;
-   if(stable>=10){preview=img;break;}
-  }
-  if(!preview)fail('UPLOAD_PREVIEW_UNCERTAIN_CANDIDATES_'+candidateCount+'_NO_RETRY');
-  let timer;
-  try{const match=await Promise.race([OmniTaskDelivery.comparePixels(image,preview,doc),new Promise((_,reject)=>{timer=setTimeout(()=>reject(Error('PIXEL_CHECK_TIMEOUT')),5000);})]);if(!match)fail('UPLOAD_PIXELS_MISMATCH');}finally{clearTimeout(timer);}
-  const attachmentIntact=()=>{intact();const list=previewCandidates(doc,baseline);if(list.length!==1||list[0]!==preview||loading()||alerts()||JSON.stringify([source(preview),preview.naturalWidth,preview.naturalHeight])!==signature)fail('ATTACHMENT_CHANGED');};
-  let send=null;
-  for(let i=0;i<50;i++){
-   attachmentIntact();
-   const buttons=[...scope.querySelectorAll('button[aria-label="Invia"]')].filter(x=>visible(x)&&!x.disabled&&x.getAttribute('aria-disabled')!=='true');
-   if(buttons.length===1){send=buttons[0];break;}
+   const img=list.length===1?list[0]:null,buttons=readyButtons();
    if(buttons.length>1)fail('SEND_AMBIGUOUS');
-   await sleep(100);
+   const next=img?JSON.stringify([source(img),img.naturalWidth,img.naturalHeight]):'';
+   const ready=sendReady({fileAssigned,previewReady:Boolean(img),loading:loading(),alert:alerts(),buttonReady:buttons.length===1});
+   stable=ready&&next===signature&&preview===img&&send===buttons[0]?stable+1:0;
+   signature=next;preview=img;send=buttons[0]||null;
+   if(stable>=10)break;
   }
-  if(!send)fail('SEND_NOT_READY');
-  attachmentIntact();send.click();show('OmniNode: invio richiesto; verifica messaggio con allegato.');
+  if(stable<10||!preview||!send)fail('UPLOAD_SEND_READY_UNCERTAIN_CANDIDATES_'+candidateCount+'_NO_RETRY');
+  intact();
+  const finalList=previewCandidates(doc,baseline),finalButtons=readyButtons();
+  if(!sendReady({fileAssigned,previewReady:finalList.length===1&&finalList[0]===preview&&JSON.stringify([source(preview),preview.naturalWidth,preview.naturalHeight])===signature,loading:loading(),alert:alerts(),buttonReady:finalButtons.length===1&&finalButtons[0]===send}))fail('ATTACHMENT_CHANGED');
+  // One attempt only. An uncertain outcome must never trigger another click.
+  send.click();show('OmniNode: invio richiesto; verifica messaggio con allegato.');
   for(let i=0;i<100;i++){
    await sleep(100);guard();
    const outgoing=[...doc.querySelectorAll('[class~="group/user-bubble"]')].filter(x=>!before.has(x)&&[x,...x.querySelectorAll('*')].some(y=>y.textContent.trim()===text));
@@ -91,6 +90,6 @@ const OmniPerplexityDelivery=(()=>{
   }
   fail('SEND_UNCERTAIN_HALT_NO_RETRY');
  }
- return {accepts,deliver,insertVerified,imageBaseline,previewCandidates};
+ return {accepts,deliver,insertVerified,imageBaseline,previewCandidates,sendReady};
 })();
 if(typeof module!=='undefined'&&module.exports)module.exports=OmniPerplexityDelivery;else globalThis.OmniPerplexityDelivery=OmniPerplexityDelivery;

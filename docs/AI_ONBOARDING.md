@@ -1,7 +1,5 @@
-# Onboarding IA
+# Onboarding AI
 
-Leggere [CURRENT_STATUS](CURRENT_STATUS.md), [START_HERE](../START_HERE.md), [AGENTS](../AGENTS.md) e [SECURITY](../SECURITY.md), poi il codice. Verificare branch, SHA e strumenti reali prima di agire.
+Aggiornamento: 9 novembre 2026. Iniziare da [handover autosufficiente](ZERO_CONTEXT_HANDOVER.md), [stato corrente](CURRENT_STATUS.md), [AGENTS](../AGENTS.md) e [SECURITY](../SECURITY.md). Poi [priorita](../NEXT_STEPS.md).
 
-La priorita e il circuito locale dalla chat, non il riavvio dei worker Oracle. Nodo online, servizio attivo, codice compilato, fixture verde e prova end-to-end sono evidenze diverse. Non usare conteggi storici per nuovi commit.
-
-Preservare copie e backup descritti in [RESUME](../RESUME.md). Leggere e testare autonomamente dove possibile; limitare l'utente all'accesso iniziale davvero indispensabile e ai gate obbligatori. Nessun accesso o contatto con altre IA va presunto. Per worker-2 usare il [resoconto storico](WORKER2_HANDOVER.md), non una certificazione live.
+Branch operativo feature/headless-local-work. Ciclo Perplexity screenshot/move/immagine osservato riuscito; il progetto generale resta incompleto. Non chiedere la vecchia chat e non presumere strumenti locali. Verificare SHA, diff, accessi e consensi prima delle scritture. Non ripetere ID o prove positive per rimettersi in contesto. Recuperi e copie storiche in RESUME.md restano da preservare.

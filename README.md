@@ -1,23 +1,13 @@
 # OmniNode
 
-OmniNode e il collegamento operativo fra chat web delle IA, browser/estensione, strumenti locali e rete gateway/worker. L'obiettivo e usare desktop, file e web dalla conversazione autorizzata, senza trasporto manuale di comandi o risultati. Non e un nuovo chatbot.
+OmniNode collega chat web AI, estensione browser, strumenti locali e gateway/worker. Non e un nuovo LLM. Obiettivo: osservare, agire nell'ambiente autorizzato e ricevere risultati nella stessa conversazione.
 
-## Stato
+## Iniziare
 
-Prototipo non ancora operativo dalla chat. Sono presenti core Go, gateway Python, estensione 0.2.0, primitive desktop e host Native Messaging con installer. La CI della baseline b669ec4 e verde, ma le prove browser usano fixture sintetiche: non dimostrano controllo del PC dell'utente o collaborazione reale fra IA.
+Leggere [START_HERE](START_HERE.md), [handover autosufficiente](docs/ZERO_CONTEXT_HANDOVER.md), [stato corrente](docs/CURRENT_STATUS.md), [AGENTS](AGENTS.md) e [SECURITY](SECURITY.md).
 
-Leggere [stato corrente](docs/CURRENT_STATUS.md), [ripresa](START_HERE.md), [sicurezza](SECURITY.md) e [build e test](BUILD.md). L'[indice](INDEX.md) elenca tutta la documentazione.
+Il 9 novembre 2026 e stato osservato nel browser reale Perplexity il ciclo screenshot 0014 -> movimento senza click 0015 -> nuova immagine ricevuta. Non prova autonomia desktop generale o completamento del progetto. Codice della correzione: `1a6ce035d814d7e6a77fcab002ab663baebdfd99`, branch `feature/headless-local-work`; verificare HEAD attuale. Manifest 0.3.4. CI dell'ultimo commit non verificata in questo handover.
 
-## Componenti
+Componenti: `omniclient/` Go; `omniclient/extension/` browser; `desktop/` Windows/Native Messaging; `node1-gateway/` gateway Python; `deploy/` e `scripts/` configurazioni, non prova di deploy.
 
-- omniclient/: worker MQTT mTLS, workspace, codice MCP/CDP e UI sperimentale.
-- omniclient/extension/: popup e broker nativo; vecchio adapter automatico disabilitato.
-- desktop/: strumenti Windows, consenso/STOP, framing nativo e installer per utente.
-- node1-gateway/: gateway, task, policy e componenti di orchestrazione.
-- deploy/ e scripts/: configurazioni e bootstrap, non prova di deploy corrente.
-
-Nessuna porta pubblica e nessun nuovo deploy sono richiesti per lo sviluppo locale. Non riutilizzare vecchi esempi MQTT plaintext o versioni Go obsolete.
-
-## Licenza
-
-MIT, come dichiarato nel README precedente. Questa manutenzione non cambia la licenza.
+[Indice](INDEX.md), [build](BUILD.md), [priorita](NEXT_STEPS.md), [recupero e copie](RESUME.md). Licenza MIT come dichiarata storicamente; questo aggiornamento non cambia la licenza.

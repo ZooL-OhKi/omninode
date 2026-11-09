@@ -1,41 +1,38 @@
 # Stato corrente OmniNode
 
-Aggiornamento: 1 novembre 2026. Branch `feature/bridge-gemini-vertical`. Ultimo commit di codice pubblicato nella sessione: `400c02c7523d7fca9d50ea0513c6349bbda4163e`. Questo documento non certifica HEAD futuro, CI, merge o deploy.
+Aggiornamento: 9 novembre 2026. Fonte operativa per lo stato; AGENTS.md e SECURITY.md restano normativi. Le vecchie descrizioni screenshot-only/non operativo e i vecchi branch non prevalgono su questo stato.
 
-AGENTS.md e SECURITY.md restano normativi: mTLS/ACL, TLS 1.3, OpenRoot/O_EXCL, consenso, scadenza e STOP non vengono indeboliti.
+## Versioni e ambienti distinti
 
-## Correzione del percorso di consegna
+- Repository: ZooL-OhKi/omninode; branch `feature/headless-local-work`.
+- Ultimo commit codice verificato prima di questo aggiornamento documentale: `1a6ce035d814d7e6a77fcab002ab663baebdfd99`. Rileggere HEAD: il commit dei documenti sara successivo.
+- File: `omniclient/extension/perplexity_delivery.js`; blob remoto `3470ec0d19a2c851cbcfe13777ac77553a213da5`, identico all'InstalledBlob riportato dall'utente Windows.
+- Installazione locale: `C:\Users\ugopl\omninode-github\omniclient\extension\perplexity_delivery.js`; aggiornamento e sintassi PASS riportati dall'utente. HEAD locale non letto; non equipararlo al commit sorgente.
+- Manifest letto: 0.3.4; nessuna modifica a manifest o host nativo nella correzione.
 
-`7ce0eb6c3a304b098d17e4ada5f8bb9cf6e90f0e` introduceva un percorso automatico solo testuale. Non completava la consegna dello screenshot.
+## Evidenze e provenienza
 
-`400c02c7523d7fca9d50ea0513c6349bbda4163e` modifica `omniclient/extension/text_delivery.js`: `autoDeliver()` richiede lo screenshot, inserisce il JSON e tenta una sola volta il paste del File. Non invia automaticamente il solo testo quando manca l'allegato. La preview deve essere unica, caricata e stabile per 3 secondi; il caricamento non stabilizzato entro 15 secondi termina in `ATTACHMENT_UNCERTAIN_HALT`. Una preview pronta o verificata che cambia termina nello stesso stato.
+Resoconto della sessione Perplexity del 9 novembre, non log grezzi o immagini versionate nel repository:
 
-L'invio richiede la conferma locale esplicita dell'allegato. `verification=user-confirmed` non significa verifica crittografica o ricevuta del provider. Il paste sintetico resta un tentativo di compatibilita. Il codice ricontrolla sessione, composer e preview prima del click; mantiene `DRAFT_PROTECTED_HOLD`, `busy`, `autoAttempted`, `sendAttempted` e nessun retry di upload o invio incerto. Queste sono proprieta previste dal codice, non risultati appena collaudati.
+| ID | Osservazione | Limite |
+|---|---|---|
+| 0006 | Consegna screenshot automatica confermata dall'utente nella sessione precedente | Non prova il movimento |
+| 0010 | Immagine e JSON ricevuti; halt `req=omni-screenshot-0010:phase=post_click:ATTACHMENT_COUNT_0` | Falso negativo della verifica allegato |
+| 0014 | Immagine screenshot 1280x720 e JSON correlato ricevuti | Osservazione iniziale |
+| omni-move-0015 | JSON `completed_action=move`, `execution_status=executed`, observation_id corrispondente e nuova immagine ricevuti, senza screenshot separato | Singola prova nel browser reale, non controllo generale |
 
-Il JSON contiene `omninode_response: true` e `completed_action`; il parser dei comandi accetta solo lo schema operativo esatto. Il percorso rimane limitato allo screenshot e non costituisce controllo desktop autonomo generale.
+0014 observed_at_ms=1794221565085; 0015 observed_at_ms=1794221576551; TTL 60000 ms; coord_space=image_pixels; immagini 1280x720; sorgente 3840x2160. Movimento richiesto (920,350), senza click, riferito a 0014. Le immagini erano allegate alla conversazione; non sono incluse in Git e questo resoconto non e una ricevuta server indipendente.
 
-## Rettifica delle evidenze di test
+## Causa e correzione
 
-L'utente ha eseguito `node --test omniclient/extension/*.test.cjs` in `A:\omninode-clean-20261101-011658`, riportando 165 pass, 0 fail, 0 skipped e 216.6092 ms. Nell'output non compaiono i sei nuovi test di `auto-delivery.test.cjs`; non e stata fornita una verifica dello SHA locale. Questo output non valida la nuova patch automatica ne il commit `400c02c7`.
+DOM fornito dall'utente: parent immediato `flex ... flex-col gap-1`, con due figli diretti: contenitore allegati `flex ... flex-wrap ...`, poi bolla `group/user-bubble` con JSON. L'immagine caricata e sorella della bolla, non sua discendente.
 
-La precedente dichiarazione che i 165 test comprendessero i sei nuovi test era errata. Il file `auto-delivery.test.cjs` pubblicato con `7ce0eb6c` contiene inoltre fixture errate: manca la preparazione del record prima di diverse chiamate ad `autoDeliver()`, e il mock di invio non svuota il composer. Non e stato corretto in questa tranche, per richiesta dell'utente di non lavorare sui test.
+`abe5c7914fed4c92a69124f8582af81f434fe96d` (PR #10 squash) gestisce composer sostituito e diagnostica post-click, ma non bastava. `1a6ce035...` limita la ricerca al contenitore allegati fratello nella struttura verificata: due figli, bolla unica, nessun composer/risposta assistente nel contenitore. Un solo tentativo di invio; non cerca immagini in antenati generici. Layout differente -> halt, non successo presunto.
 
-Nessun test eseguito dall'assistente per `400c02c7`; nessun esito CI recente verificato. Nessuna certificazione di funzionamento finale.
+## Test: non sommare evidenze diverse
 
-## Prove fisiche e limiti
+236 pass erano stati riportati per la precedente installazione da `31eb38e0eded706e74f5aa1ae40a0b98c8a43c62`, non per l'ultimo commit. I due check adapter-tests della PR #10 sono stati osservati success. Quattro verifiche isolate della guardia strutturale sono passate nell'ambiente Node dell'assistente; non sono la suite completa e non sono state aggiunte al repository. CI completa del commit `1a6ce035...`: non verificata in questa sessione. La prova browser 0014 -> 0015 e distinta da queste esecuzioni.
 
-`e2e-image-006` resta il resoconto positivo storico del percorso assistito screenshot -> allegato Gemini -> lettura visiva, con conferma utente. Provenienza e limiti sono in `ZERO_CONTEXT_HANDOVER.md`; l'immagine originale non e versionata. Non ripetere gli ID storici come comandi live.
+## Residui
 
-Non e attestata l'installazione Windows del commit `400c02c7`, il reload dell'estensione o una nuova consegna nel composer. La schermata della sessione attiva non prova il successo dell'allegato. Nessun merge o aggiornamento Oracle effettuato.
-
-Restano aperti STOP nativo/browser bidirezionale, race fisiche, persistenza/crash senza replay, Unicode/DPI/multi-monitor, hardening Go e collaborazione con una seconda chat reale.
-
-## Copie e accesso operativo
-
-Copia Windows storicamente attiva: `C:\Users\ugopl\omninode-github`. Copia usata per i 165 test: `A:\omninode-clean-20261101-011658`. Allineamento C:/A:/Drive e recupero del precedente `desktop.ini` in `.git/refs` non certificati. Preservare backup, stash e branch di recupero; nessun reset distruttivo, force push o sincronizzazione di `.git` tramite Drive.
-
-Il connettore GitHub permette modifiche al repository, non l'esecuzione sul PC Windows. La ricerca degli strumenti disponibili non ha restituito un esecutore Windows o un canale desktop utilizzabile dall'assistente. Non chiedere approvazioni per azioni locali che non si possono eseguire e non dichiararle compiute.
-
-## Precedenza documentale
-
-Questa rettifica prevale sulle precedenti affermazioni di `NEXT_STEPS.md` che attribuiscono alla nuova consegna automatica la validazione dei 165 test. Il codice e pubblicato; installazione e funzionamento della nuova versione non sono dimostrati.
+Ciclo pointer osservato riuscito; non qualificati in questa sessione: STOP/race completi, crash e replay, tastiera/click da chat, Unicode/multi-monitor, collaborazione AI autonoma, servizi remoti e produzione. Seguire NEXT_STEPS.md. Non reinstallare il file gia corrispondente solo per i documenti.

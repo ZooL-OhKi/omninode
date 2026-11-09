@@ -1,0 +1,22 @@
+{
+  "manifest_version": 3,
+  "name": "OmniNode Bridge",
+  "version": "0.3.4",
+  "description": "Bridge desktop locale. Consegna screenshot Perplexity con verifica allegato; compatibilita browser da verificare.",
+  "permissions": ["activeTab", "tabs", "nativeMessaging"],
+  "background": {"service_worker": "service_worker.js"},
+  "action": {"default_title": "OmniNode Desktop", "default_popup": "desktop.html"},
+  "content_scripts": [
+    {
+      "matches": ["https://gemini.google.com/*"],
+      "js": ["action_policy.js", "task_delivery.js", "text_delivery.js", "content.js"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": ["https://perplexity.ai/*", "https://www.perplexity.ai/*"],
+      "js": ["action_policy.js", "task_delivery.js", "text_delivery.js", "perplexity_adapter.js", "perplexity_delivery.js", "perplexity_content.js"],
+      "run_at": "document_idle",
+      "all_frames": false
+    }
+  ]
+}

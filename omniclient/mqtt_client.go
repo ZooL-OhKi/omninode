@@ -8,9 +8,9 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"time"
 
 	mqtt "github.com/eclipse/paho.mqtt.golang"
-	"time"
 )
 
 type WorkerConfig struct {
@@ -18,6 +18,7 @@ type WorkerConfig struct {
 	ClientID      string
 	Username      string
 	Password      string
+	TLSConfig     *tls.Config
 	CACertPath    string
 	CertPath      string
 	KeyPath       string
@@ -98,23 +99,23 @@ func buildTLSConfig(caPath, certPath, keyPath, serverName string) (*tls.Config, 
 }
 
 func NewMQTTClient(config WorkerConfig) (mqtt.Client, error) {
-	tlsConfig, err := buildTLSConfig(config.CACertPath, config.CertPath, config.KeyPath, config.ServerName)
-	if err != nil {
-		return nil, err
-	}
-
 	handler := NewWorkspaceHandler(config.WorkspaceRoot)
+
 	opts := mqtt.NewClientOptions()
 	opts.AddBroker(config.BrokerURL)
 	opts.SetClientID(config.ClientID)
 	opts.SetUsername(config.Username)
 	opts.SetPassword(config.Password)
-	opts.SetTLSConfig(tlsConfig)
 	opts.SetCleanSession(false)
 	opts.SetAutoReconnect(true)
 	opts.SetConnectRetry(true)
 	opts.SetConnectRetryInterval(5 * time.Second)
 	opts.SetMaxReconnectInterval(60 * time.Second)
+
+	if config.TLSConfig != nil {
+		opts.SetTLSConfig(config.TLSConfig.Clone())
+	}
+
 	opts.SetOnConnectHandler(func(client mqtt.Client) {
 		for topic, handler := range map[string]mqtt.MessageHandler{
 			taskTopic(config.NodeID): func(_ mqtt.Client, message mqtt.Message) {
@@ -131,6 +132,8 @@ func NewMQTTClient(config WorkerConfig) (mqtt.Client, error) {
 			}
 			log.Printf("[MQTT] sottoscritto a %s", topic)
 		}
+
+		subscribeAgentTopics(client, config.NodeID)
 	})
 
 	return mqtt.NewClient(opts), nil

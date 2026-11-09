@@ -26,10 +26,10 @@ func TestBuildTLSConfigFailsOnMissingFiles(t *testing.T) {
 
 func TestV1Topics(t *testing.T) {
 	cases := map[string]func(string) string{
-		"omninode/v1/nodes/worker-1/tasks":        taskTopic,
-		"omninode/v1/nodes/worker-1/responses":    responseTopic,
-		"omninode/v1/nodes/worker-1/heartbeat":    heartbeatTopic,
-		"omninode/v1/nodes/worker-1/control":      controlTopic,
+		"omninode/v1/nodes/worker-1/tasks":       taskTopic,
+		"omninode/v1/nodes/worker-1/responses":   responseTopic,
+		"omninode/v1/nodes/worker-1/heartbeat":   heartbeatTopic,
+		"omninode/v1/nodes/worker-1/control":     controlTopic,
 		"omninode/v1/nodes/worker-1/control/ack": controlAckTopic,
 	}
 	for expected, builder := range cases {

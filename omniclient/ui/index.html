@@ -1,0 +1,198 @@
+﻿<!DOCTYPE html>
+<html lang="it" class="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>OmniNode Control Center</title>
+  <link rel="manifest" href="/manifest.json">
+  <meta name="theme-color" content="#0f172a">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    body { background-color: #0f172a; color: #f8fafc; font-family: system-ui, -apple-system, sans-serif; }
+    .glass { background: rgba(30, 41, 59, 0.78); backdrop-filter: blur(12px); border: 1px solid rgba(255,255,255,0.08); }
+  </style>
+</head>
+<body class="min-h-screen p-4 md:p-8">
+  <div class="max-w-5xl mx-auto space-y-6">
+    <!-- Header -->
+    <header class="glass rounded-xl p-5 flex flex-wrap items-center justify-between gap-4">
+      <div class="flex items-center space-x-3">
+        <div class="w-3 h-3 rounded-full bg-emerald-400 animate-pulse" id="status-dot"></div>
+        <div>
+          <h1 class="text-xl font-bold tracking-tight text-white">OMNINODE <span class="text-blue-400 font-normal">COMMAND & MONITOR</span></h1>
+          <p class="text-xs text-slate-400">PWA Standalone • Custom Browser & Mobile Ready (plini.net)</p>
+        </div>
+      </div>
+      <div class="flex items-center space-x-2">
+        <button onclick="checkStatus()" class="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-xs font-medium rounded-lg border border-slate-600 transition">
+          Sincronizza Telemetria
+        </button>
+      </div>
+    </header>
+
+    <!-- AI / Natural Language Command Bar -->
+    <section class="glass rounded-xl p-6 space-y-3 border-l-4 border-purple-500">
+      <h2 class="text-sm font-semibold uppercase tracking-wider text-purple-400">Comando Rapido IA (Linguaggio Naturale -> MCP)</h2>
+      <p class="text-xs text-slate-400">Esempio: <code>Crea un file appunti.txt nel workspace di Archivista: Riunione completata con successo</code></p>
+      <div class="flex flex-col md:flex-row gap-3">
+        <input type="text" id="nl_prompt" placeholder="Crea un file di appunti nel workspace di Archivista con questo contenuto: ..." class="flex-1 bg-slate-900 border border-slate-700 rounded-lg px-3.5 py-2.5 text-sm text-white focus:outline-none focus:border-purple-500">
+        <button onclick="sendNaturalPrompt()" id="nl-btn" class="px-5 py-2.5 bg-purple-600 hover:bg-purple-500 text-white text-sm font-semibold rounded-lg shadow-lg transition whitespace-nowrap">
+          Esegui Comando IA
+        </button>
+      </div>
+    </section>
+
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      <!-- Structured Task Panel -->
+      <section class="glass rounded-xl p-6 space-y-4">
+        <h2 class="text-sm font-semibold uppercase tracking-wider text-blue-400">Invio Strutturato (workspace.write)</h2>
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div>
+            <label class="block text-xs text-slate-400 mb-1">Agente Target</label>
+            <input type="text" id="agent_id" value="archivista" class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white">
+          </div>
+          <div>
+            <label class="block text-xs text-slate-400 mb-1">Percorso File</label>
+            <input type="text" id="path" placeholder="note-operative.txt" class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white">
+          </div>
+        </div>
+        <div>
+          <label class="block text-xs text-slate-400 mb-1">Contenuto</label>
+          <textarea id="content" rows="3" placeholder="Testo da salvare nel workspace..." class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white"></textarea>
+        </div>
+        <button onclick="sendTask()" id="send-btn" class="w-full py-2.5 bg-blue-600 hover:bg-blue-500 text-white text-sm font-semibold rounded-lg shadow-lg transition">
+          Invia Task Diretto
+        </button>
+      </section>
+
+      <!-- Output & Telemetry Console -->
+      <section class="glass rounded-xl p-6 space-y-3 flex flex-col">
+        <div class="flex justify-between items-center">
+          <h2 class="text-sm font-semibold uppercase tracking-wider text-emerald-400">Risposta Gateway & Worker</h2>
+          <span id="http-badge" class="text-xs px-2 py-0.5 rounded bg-slate-800 text-slate-300">Pronto</span>
+        </div>
+        <pre id="output" class="flex-1 bg-slate-950 p-4 rounded-lg text-xs font-mono text-emerald-300 overflow-x-auto border border-slate-800 min-h-[160px]">In attesa di comandi...</pre>
+      </section>
+    </div>
+
+    <!-- Activity Monitor -->
+    <section class="glass rounded-xl p-6 space-y-3">
+      <h2 class="text-sm font-semibold uppercase tracking-wider text-amber-400">Registro Attività Recenti (Live Monitor)</h2>
+      <div class="overflow-x-auto">
+        <table class="w-full text-left text-xs text-slate-300">
+          <thead class="text-slate-400 border-b border-slate-700">
+            <tr>
+              <th class="py-2 pr-4">Task ID</th>
+              <th class="py-2 pr-4">Metodo</th>
+              <th class="py-2 pr-4">Agente</th>
+              <th class="py-2 pr-4">File</th>
+              <th class="py-2 pr-4">Esito</th>
+              <th class="py-2">Timestamp</th>
+            </tr>
+          </thead>
+          <tbody id="history-body" class="divide-y divide-slate-800">
+            <tr><td colspan="6" class="py-3 text-slate-500">Nessun task registrato in questa sessione.</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+  </div>
+
+  <script>
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('/sw.js').catch(() => {});
+    }
+
+    async function sendNaturalPrompt() {
+      const prompt = document.getElementById('nl_prompt').value.trim();
+      const agent_id = document.getElementById('agent_id').value.trim() || 'archivista';
+      const path = document.getElementById('path').value.trim();
+      const out = document.getElementById('output');
+      const badge = document.getElementById('http-badge');
+
+      if (!prompt) {
+        out.textContent = "Inserisci un comando nella barra IA.";
+        return;
+      }
+
+      out.textContent = "Interpretazione comando e invio al gateway MCP...";
+      try {
+        const res = await fetch('/api/task/prompt', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ prompt, agent_id, path })
+        });
+        badge.textContent = `HTTP ${res.status}`;
+        const data = await res.json();
+        out.textContent = JSON.stringify(data, null, 2);
+        checkStatus(true);
+      } catch (err) {
+        out.textContent = "Errore: " + err.message;
+      }
+    }
+
+    async function sendTask() {
+      const btn = document.getElementById('send-btn');
+      const out = document.getElementById('output');
+      const badge = document.getElementById('http-badge');
+      const agent_id = document.getElementById('agent_id').value.trim();
+      const path = document.getElementById('path').value.trim();
+      const content = document.getElementById('content').value;
+
+      if (!path) {
+        out.textContent = "Errore: specifica un percorso file valido.";
+        return;
+      }
+
+      btn.disabled = true;
+      out.textContent = "Inoltro richiesta JSON-RPC al gateway locale...";
+
+      try {
+        const res = await fetch('/api/task/write', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ agent_id, path, content })
+        });
+        badge.textContent = `HTTP ${res.status}`;
+        const data = await res.json();
+        out.textContent = JSON.stringify(data, null, 2);
+        checkStatus(true);
+      } catch (err) {
+        badge.textContent = "Errore di Rete";
+        out.textContent = "Errore comunicazione col backend UI: " + err.message;
+      } finally {
+        btn.disabled = false;
+      }
+    }
+
+    async function checkStatus(silent = false) {
+      const out = document.getElementById('output');
+      const badge = document.getElementById('http-badge');
+      const tbody = document.getElementById('history-body');
+      try {
+        const res = await fetch('/api/health');
+        const data = await res.json();
+        if (!silent) {
+          badge.textContent = `HTTP ${res.status}`;
+          out.textContent = JSON.stringify(data, null, 2);
+        }
+        if (Array.isArray(data.history) && data.history.length > 0) {
+          tbody.innerHTML = data.history.map(h => `
+            <tr>
+              <td class="py-2 pr-4 font-mono text-blue-300">${h.task_id}</td>
+              <td class="py-2 pr-4">${h.method}</td>
+              <td class="py-2 pr-4">${h.agent_id}</td>
+              <td class="py-2 pr-4 font-mono">${h.path}</td>
+              <td class="py-2 pr-4 text-emerald-400">${h.status}</td>
+              <td class="py-2 text-slate-400">${h.timestamp}</td>
+            </tr>
+          `).join('');
+        }
+      } catch (err) {
+        if (!silent) out.textContent = "Impossibile verificare lo stato: " + err.message;
+      }
+    }
+    checkStatus(true);
+  </script>
+</body>
+</html>

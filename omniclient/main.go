@@ -1,9 +1,13 @@
 package main
 
 import (
+	"crypto/tls"
 	"log"
+	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 )
 
@@ -15,28 +19,116 @@ func requiredEnv(name string) string {
 	return value
 }
 
+func startOptionalUIServer() *http.Server {
+	uiAddr := os.Getenv("UI_LISTEN_ADDR")
+	if uiAddr == "" {
+		return nil
+	}
+	gatewayURL := os.Getenv("GATEWAY_URL")
+	if gatewayURL == "" {
+		gatewayURL = "http://127.0.0.1:8000"
+	}
+	mcpSecret := os.Getenv("MCP_SECRET")
+
+	var bridge *BridgeService
+	workspaceRoot := os.Getenv("OMNINODE_WORKSPACE_ROOT")
+	bridgeToken := os.Getenv("OMNINODE_BRIDGE_TOKEN")
+	if workspaceRoot != "" && bridgeToken != "" {
+		if err := os.MkdirAll(workspaceRoot, 0o750); err != nil {
+			log.Fatalf("[OmniClient] impossibile creare il workspace root %s: %v", workspaceRoot, err)
+		}
+		workspace := NewWorkspaceHandler(workspaceRoot)
+		allowedOrigin := os.Getenv("OMNINODE_ALLOWED_ORIGIN")
+		if allowedOrigin == "" {
+			allowedOrigin = "http://" + uiAddr
+		}
+		var err error
+		bridge, err = NewBridgeService(workspace, bridgeToken, allowedOrigin)
+		if err != nil {
+			log.Fatalf("[OmniClient] bridge non avviabile: %v", err)
+		}
+		log.Printf("[OmniClient] bridge locale attivo su /api/bridge/execute (workspace: %s)", workspaceRoot)
+	}
+
+	handler, err := NewUIHandler(gatewayURL, mcpSecret, bridge)
+	if err != nil {
+		log.Fatalf("[OmniClient] impossibile inizializzare UI server: %v", err)
+	}
+
+	srv := &http.Server{
+		Addr:    uiAddr,
+		Handler: handler,
+	}
+
+	go func() {
+		log.Printf("[OmniClient] Web UI / PWA attiva su http://%s (Gateway: %s)", uiAddr, gatewayURL)
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Fatalf("[OmniClient] errore UI server: %v", err)
+		}
+	}()
+	return srv
+}
+
 func main() {
+	signals := make(chan os.Signal, 1)
+	signal.Notify(signals, syscall.SIGINT, syscall.SIGTERM)
+
+	if os.Getenv("UI_ONLY") == "1" {
+		if os.Getenv("UI_LISTEN_ADDR") == "" {
+			_ = os.Setenv("UI_LISTEN_ADDR", "127.0.0.1:8080")
+		}
+		startOptionalUIServer()
+		<-signals
+		log.Println("[OmniClient] arresto UI standalone")
+		return
+	}
+
 	log.Println("[OmniClient] avvio worker OmniNode")
+	startOptionalUIServer()
+
+	if err := InitWebAgent(); err != nil {
+		log.Printf("[OmniClient] browser agent ONAP non disponibile: %v", err)
+	}
 
 	brokerURL := requiredEnv("OMNINODE_MQTT_BROKER")
 	nodeID := requiredEnv("OMNINODE_NODE_ID")
 	agentID := requiredEnv("OMNINODE_AGENT_ID")
 	username := requiredEnv("OMNINODE_MQTT_USER")
 	password := requiredEnv("OMNINODE_MQTT_PASS")
-	caPath := requiredEnv("OMNINODE_MQTT_CA_PATH")
-	certPath := requiredEnv("OMNINODE_MQTT_CERT_PATH")
-	keyPath := requiredEnv("OMNINODE_MQTT_KEY_PATH")
 	serverName := os.Getenv("OMNINODE_MQTT_SERVER_NAME")
 	workspaceRoot := requiredEnv("OMNINODE_WORKSPACE_ROOT")
+
+	parsedBrokerURL, err := url.Parse(brokerURL)
+	if err != nil {
+		log.Fatalf("[OmniClient] URL broker non valido: %v", err)
+	}
+
+	var tlsConfig *tls.Config
+
+	switch strings.ToLower(parsedBrokerURL.Scheme) {
+	case "mqtt", "tcp":
+		tlsConfig = nil
+
+	case "ssl", "tls", "mqtts", "mqtt+ssl", "tcps":
+		caPath := requiredEnv("OMNINODE_MQTT_CA_PATH")
+		certPath := requiredEnv("OMNINODE_MQTT_CERT_PATH")
+		keyPath := requiredEnv("OMNINODE_MQTT_KEY_PATH")
+
+		tlsConfig, err = buildTLSConfig(caPath, certPath, keyPath, serverName)
+		if err != nil {
+			log.Fatalf("[OmniClient] configurazione mTLS non valida: %v", err)
+		}
+
+	default:
+		log.Fatalf("[OmniClient] schema broker non supportato: %q; usa mqtt:// oppure tcp:// per TLS disattivato, oppure mqtts://, ssl://, tls://, mqtt+ssl:// oppure tcps:// per mTLS", parsedBrokerURL.Scheme)
+	}
 
 	client, err := StartMQTTWorker(WorkerConfig{
 		BrokerURL:     brokerURL,
 		ClientID:      nodeID,
 		Username:      username,
 		Password:      password,
-		CACertPath:    caPath,
-		CertPath:      certPath,
-		KeyPath:       keyPath,
+		TLSConfig:     tlsConfig,
 		ServerName:    serverName,
 		NodeID:        nodeID,
 		WorkspaceRoot: workspaceRoot,
@@ -49,8 +141,6 @@ func main() {
 	stop := make(chan struct{})
 	go startHeartbeatLoop(client, nodeID, []string{agentID}, stop)
 
-	signals := make(chan os.Signal, 1)
-	signal.Notify(signals, syscall.SIGINT, syscall.SIGTERM)
 	<-signals
 
 	log.Println("[OmniClient] arresto richiesto")

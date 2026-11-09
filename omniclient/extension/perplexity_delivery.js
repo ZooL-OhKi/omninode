@@ -1,0 +1,118 @@
+'use strict';
+const OmniPerplexityDelivery=(()=>{
+ const visible=x=>Boolean(x?.isConnected&&x.getClientRects().length);
+ const read=editor=>(editor.textContent||'').trim();
+ const source=x=>x.currentSrc||x.src||'';
+ function imageBaseline(doc){return new Set([...doc.querySelectorAll('img')].map(source).filter(Boolean));}
+ function previewCandidates(doc,baseline){return [...doc.querySelectorAll('img')].filter(x=>visible(x)&&x.complete&&x.naturalWidth>0&&x.naturalHeight>0&&source(x)&&!baseline.has(source(x))&&!x.closest('[data-workflow-final-text],[class~="group/user-bubble"]'));}
+ function sendReady({fileAssigned,previewReady,loading,alert,buttonReady}){return fileAssigned===true&&previewReady===true&&loading===false&&alert===false&&buttonReady===true;}
+ function makeResultText(image,id){
+  const action=image.completed_action;
+  if(!['screenshot','move','click','type','press','hotkey'].includes(action)||image.observation_id!==id||!Number.isSafeInteger(image.observed_at_ms)||image.observed_at_ms<0||!Number.isSafeInteger(image.observation_ttl_ms)||image.observation_ttl_ms<1||image.coord_space!=='image_pixels')throw Error('INVALID_OBSERVATION_METADATA');
+  if(![image.width,image.height,image.source_width,image.source_height].every(x=>Number.isSafeInteger(x)&&x>0)||image.width>1280||image.height>800||image.source_width<image.width||image.source_height<image.height)throw Error('INVALID_OBSERVATION_GEOMETRY');
+  return JSON.stringify({omninode_response:true,request_id:id,status:'ok',completed_action:action,execution_status:action==='screenshot'?'observed':'executed',observation_id:image.observation_id,observed_at_ms:image.observed_at_ms,observation_ttl_ms:image.observation_ttl_ms,coord_space:image.coord_space,width:image.width,height:image.height,source_width:image.source_width,source_height:image.source_height});
+ }
+ async function insertVerified(editor,text,isActive,doc,options={}){
+  const wait=options.wait|| (ms=>new Promise(r=>setTimeout(r,ms)));
+  const guard=()=>{if(!isActive())throw Error('INSERT_SESSION_CHANGED');if(!editor.isConnected)throw Error('INSERT_EDITOR_REPLACED');};
+  guard();if(read(editor))throw Error('DRAFT_PROTECTED_HOLD');
+  let touched=false;const onEdit=e=>{if(e.isTrusted)touched=true;};
+  editor.addEventListener('beforeinput',onEdit);
+  try{
+   editor.focus();guard();if(read(editor)||touched)throw Error('DRAFT_CHANGED');
+   const range=doc.createRange(),selection=doc.defaultView.getSelection();
+   if(!selection)throw Error('INSERT_SELECTION_UNAVAILABLE');
+   range.selectNodeContents(editor);range.collapse(false);selection.removeAllRanges();selection.addRange(range);
+   guard();if(read(editor)||touched)throw Error('DRAFT_CHANGED');
+   let returned=false,threw=false;
+   try{returned=doc.execCommand('insertText',false,text);}catch{threw=true;}
+   let stable=0;
+   for(let i=0;i<30;i++){
+    await wait(100);guard();if(touched)throw Error('DRAFT_CHANGED');
+    const actual=read(editor);
+    if(actual===text){if(++stable>=3)return {state:'INSERT_VERIFIED',commandReturned:returned,commandThrew:threw};}
+    else{stable=0;if(actual)throw Error('INSERT_TEXT_MISMATCH');}
+   }
+   throw Error(threw?'INSERT_COMMAND_EXCEPTION':returned?'INSERT_NOT_OBSERVED':'INSERT_COMMAND_REJECTED');
+  }finally{editor.removeEventListener('beforeinput',onEdit);}
+ }
+ function accepts(input,mime){const tokens=input.accept.toLowerCase().split(',').map(x=>x.trim());return tokens.includes('image/*')||tokens.includes(mime)||tokens.includes(mime==='image/png'?'.png':'.jpg')||(mime==='image/jpeg'&&tokens.includes('.jpeg'));}
+ async function deliver({image,id,isActive,show},doc=document){
+  const fail=code=>{throw Error(code);},sleep=ms=>new Promise(r=>setTimeout(r,ms));
+  const guard=()=>{if(!isActive())fail('DELIVERY_SESSION_CHANGED');};
+  guard();
+  const editors=[...doc.querySelectorAll('[contenteditable="true"][role="textbox"]')].filter(visible);
+  if(editors.length!==1)fail('COMPOSER_AMBIGUOUS');
+  const editor=editors[0];let scope=editor.parentElement;
+  for(let depth=0;scope&&depth<7;depth++,scope=scope.parentElement){if(scope.querySelector('button[aria-label="Invia"]'))break;}
+  if(!scope||scope===doc.body||scope===doc.documentElement)fail('COMPOSER_SCOPE_UNKNOWN');
+  const inputs=[...doc.querySelectorAll('input[type="file"]')];
+  if(inputs.length!==1||!accepts(inputs[0],image.mime))fail('IMAGE_INPUT_UNSUPPORTED');
+  const input=inputs[0];
+  const images=()=>[...scope.querySelectorAll('img')].filter(visible);
+  const loading=()=>[...scope.querySelectorAll('[aria-busy="true"],[role="progressbar"]')].some(visible);
+  const alerts=()=>[...scope.querySelectorAll('[role="alert"]')].some(visible);
+  if(read(editor)||images().length||loading()||alerts()||input.files?.length)fail('DRAFT_PROTECTED_HOLD');
+  const text=makeResultText(image,id);
+  const file=OmniTextDelivery.screenshotFile(image,id);
+  const before=new Set(doc.querySelectorAll('[class~="group/user-bubble"]'));
+  show('OmniNode: inserimento risultato; verifica composer.');
+  await insertVerified(editor,text,isActive,doc);
+  const intact=()=>{guard();if(!editor.isConnected||read(editor)!==text)fail('DRAFT_CHANGED');};
+  intact();if(images().length||input.files?.length||loading()||alerts())fail('ATTACHMENT_CHANGED');
+  const baseline=imageBaseline(doc);
+  const transfer=new DataTransfer();transfer.items.add(file);
+  input.files=transfer.files;
+  const fileAssigned=input.files.length===1&&input.files[0].name===file.name&&input.files[0].size===file.size&&input.files[0].type===file.type;
+  if(!fileAssigned)fail('FILE_ASSIGNMENT_FAILED');
+  show('OmniNode: caricamento screenshot; attesa anteprima e prontezza invio.');
+  input.dispatchEvent(new Event('change',{bubbles:true,composed:true}));
+  let preview=null,send=null,signature='',stable=0,candidateCount=0;
+  const readyButtons=()=>[...scope.querySelectorAll('button[aria-label="Invia"]')].filter(x=>visible(x)&&!x.disabled&&x.getAttribute('aria-disabled')!=='true'&&doc.defaultView.getComputedStyle(x).pointerEvents!=='none');
+  // This is local UI readiness, not proof of HTTP upload completion.
+  for(let i=0;i<300;i++){
+   await sleep(100);intact();if(alerts())fail('UPLOAD_ALERT');
+   const list=previewCandidates(doc,baseline);candidateCount=list.length;
+   const img=list.length===1?list[0]:null,buttons=readyButtons();
+   if(buttons.length>1)fail('SEND_AMBIGUOUS');
+   const next=img?JSON.stringify([source(img),img.naturalWidth,img.naturalHeight]):'';
+   const ready=sendReady({fileAssigned,previewReady:Boolean(img),loading:loading(),alert:alerts(),buttonReady:buttons.length===1});
+   stable=ready&&next===signature&&preview===img&&send===buttons[0]?stable+1:0;
+   signature=next;preview=img;send=buttons[0]||null;
+   if(stable>=10)break;
+  }
+  if(stable<10||!preview||!send)fail('UPLOAD_SEND_READY_UNCERTAIN_CANDIDATES_'+candidateCount+'_NO_RETRY');
+  intact();
+  const finalList=previewCandidates(doc,baseline),finalButtons=readyButtons();
+  if(!sendReady({fileAssigned,previewReady:finalList.length===1&&finalList[0]===preview&&JSON.stringify([source(preview),preview.naturalWidth,preview.naturalHeight])===signature,loading:loading(),alert:alerts(),buttonReady:finalButtons.length===1&&finalButtons[0]===send}))fail('ATTACHMENT_CHANGED');
+  // One attempt only. An uncertain outcome must never trigger another click.
+  send.click();show('OmniNode: invio richiesto; verifica messaggio con allegato.');
+  let lastDiag='NO_OBSERVATION';
+  for(let i=0;i<100;i++){
+   await sleep(100);
+   if(!isActive())fail('SEND_UNCERTAIN_HALT_NO_RETRY:req='+id+':phase=post_click:SESSION_CHANGED');
+   const bubbles=[...doc.querySelectorAll('[class~="group/user-bubble"]')].filter(x=>!before.has(x));
+   const outgoing=bubbles.filter(x=>[x,...x.querySelectorAll('*')].some(y=>y.textContent.trim()===text));
+   if(outgoing.length!==1){lastDiag=bubbles.length===0?'NO_NEW_BUBBLE':outgoing.length===0?'JSON_NOT_CORRELATED':'MULTIPLE_CORRELATED_BUBBLES';continue;}
+   const currentEditors=[...doc.querySelectorAll('[contenteditable="true"][role="textbox"]')].filter(visible);
+   if(currentEditors.length!==1){lastDiag='COMPOSER_COUNT_'+currentEditors.length;continue;}
+   if(editor.isConnected&&currentEditors[0]!==editor){lastDiag='COMPOSER_IDENTITY_AMBIGUOUS';continue;}
+   if(read(currentEditors[0])){lastDiag=editor.isConnected?'COMPOSER_NOT_EMPTY':'REPLACEMENT_NOT_EMPTY';continue;}
+   const bubble=outgoing[0], message=bubble.parentElement;
+   const parts=message?[...message.children]:[];
+   const bubbleSelector='[class~="group/user-bubble"]';
+   const layoutOk=Boolean(message&&message.isConnected&&message.classList.contains('flex-col')&&parts.length===2&&parts[1]===bubble&&parts[0].classList.contains('flex-wrap')&&message.querySelectorAll(bubbleSelector).length===1&&message.querySelectorAll('[data-workflow-final-text],[contenteditable="true"]').length===0&&parts[0].querySelectorAll(bubbleSelector).length===0);
+   if(!layoutOk){lastDiag='MESSAGE_ATTACHMENT_LAYOUT_UNVERIFIED';continue;}
+   const attached=[...parts[0].querySelectorAll('img')];
+   if(attached.length!==1){lastDiag='ATTACHMENT_COUNT_'+attached.length;continue;}
+   const img=attached[0];
+   if(!visible(img)){lastDiag='ATTACHMENT_NOT_VISIBLE';continue;}
+   if(!img.complete||img.naturalWidth<=0||img.naturalHeight<=0){lastDiag='ATTACHMENT_NOT_LOADED';continue;}
+   try{if(currentEditors[0]?.isConnected)currentEditors[0].blur();}catch{}
+   return {state:'SENT_WITH_ATTACHMENT_OBSERVED',request_id:id};
+  }
+  fail('SEND_UNCERTAIN_HALT_NO_RETRY:req='+id+':phase=post_click:'+lastDiag);
+ }
+ return {accepts,deliver,insertVerified,imageBaseline,previewCandidates,sendReady,makeResultText};
+})();
+if(typeof module!=='undefined'&&module.exports)module.exports=OmniPerplexityDelivery;else globalThis.OmniPerplexityDelivery=OmniPerplexityDelivery;

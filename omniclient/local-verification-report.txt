@@ -1,0 +1,51 @@
+=== RAPPORTOM DI VERIFICA LOCALE OMNINODE ===
+Data esecuzione: 2026-10-15 23:28:27
+Directory di lavoro: C:\Users\ugopl\omninode-github\omniclient
+Versione Go: go version go1.27.1 windows/amd64
+
+--- 1. ESECUZIONE TEST GO (OMNICLIENT) ---
+=== RUN   TestHeartbeatTopicUsesV1
+--- PASS: TestHeartbeatTopicUsesV1 (0.00s)
+=== RUN   TestHeartbeatPayloadIsStructuredJSON
+--- PASS: TestHeartbeatPayloadIsStructuredJSON (0.00s)
+=== RUN   TestNewOmninodeServer
+--- PASS: TestNewOmninodeServer (0.00s)
+=== RUN   TestGatewayHTTPWithTestServer
+--- PASS: TestGatewayHTTPWithTestServer (0.00s)
+=== RUN   TestOmninodeCommandVerifyRejectsUnknownPreset
+--- PASS: TestOmninodeCommandVerifyRejectsUnknownPreset (0.00s)
+=== RUN   TestOmninodeWorkspaceReadDecodesGatewayResult
+--- PASS: TestOmninodeWorkspaceReadDecodesGatewayResult (0.00s)
+=== RUN   TestOmninodeAutonomyStepCallsAtomicRunStep
+--- PASS: TestOmninodeAutonomyStepCallsAtomicRunStep (0.00s)
+=== RUN   TestBuildTLSConfigRequiresAllCredentials
+--- PASS: TestBuildTLSConfigRequiresAllCredentials (0.00s)
+=== RUN   TestBuildTLSConfigFailsOnMissingFiles
+--- PASS: TestBuildTLSConfigFailsOnMissingFiles (0.00s)
+=== RUN   TestV1Topics
+--- PASS: TestV1Topics (0.00s)
+=== RUN   TestTaskResponseIsStructuredJSON
+--- PASS: TestTaskResponseIsStructuredJSON (0.00s)
+=== RUN   TestControlAcknowledgementIsStructuredJSON
+--- PASS: TestControlAcknowledgementIsStructuredJSON (0.00s)
+=== RUN   TestWorkspaceHandlerRejectsPathTraversal
+--- PASS: TestWorkspaceHandlerRejectsPathTraversal (0.00s)
+=== RUN   TestBuildTLSConfigRejectsHostnameMismatch
+--- PASS: TestBuildTLSConfigRejectsHostnameMismatch (0.13s)
+=== RUN   TestWorkspaceHandlerWritesInsideRoot
+--- PASS: TestWorkspaceHandlerWritesInsideRoot (0.01s)
+=== RUN   TestWorkspaceHandlerRejectsUnknownTask
+--- PASS: TestWorkspaceHandlerRejectsUnknownTask (0.00s)
+=== RUN   TestWorkspaceHandlerIgnoresDuplicateTask
+--- PASS: TestWorkspaceHandlerIgnoresDuplicateTask (0.01s)
+=== RUN   TestWorkspaceHandlerPersistsProcessedTasks
+--- PASS: TestWorkspaceHandlerPersistsProcessedTasks (0.01s)
+PASS
+ok  	github.com/ZooL-OhKi/omniclient	1.396s
+?   	github.com/ZooL-OhKi/omniclient/mqttclient	[no test files]
+Codice uscita test Go: 0
+
+--- 2. COMPILAZIONE BINARIO TEST ---
+Compilazione binario locale: Exit Code 0
+
+=== VERIFICA COMPLETATA CON SUCCESSO ===

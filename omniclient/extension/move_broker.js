@@ -1,6 +1,7 @@
 "use strict";
 const moveDeps=typeof module!=="undefined"&&module.exports?{...require("./desktop_broker.js"),...require("./bridge_result.js"),OmniActionPolicy:require("./action_policy.js")}:globalThis;
 const OBSERVATION_TTL_MS=60000;
+const POST_INPUT_SETTLE_MS=150;
 const MOVE_SCHEMAS={move:["x","y"],click:["x","y","button"],drag:["x","y","to_x","to_y"],notepad_write:["x","y","text"],type:["text"],press:["key"],hotkey:["keys"],scroll:["steps"]};
 function validateMovePayload(action,args){
  if(!Object.hasOwn(MOVE_SCHEMAS,action)||!args||Array.isArray(args)||typeof args!=="object")throw Error("INVALID_ACTION");
@@ -41,6 +42,7 @@ class OmniMoveBroker extends moveDeps.OmniDesktopBroker {
   const a=p.args;
   const bound=/^https:\/\/(www\.)?perplexity\.ai\//.test(s.conversation)||Object.hasOwn(a,"observation_id");
   const reference=bound?requireObservation(s,a):null;
+  if(['type','press','hotkey'].includes(p.action)&&!s.targetConfirmed)reject('TARGET_CLICK_REQUIRED_BEFORE_KEYBOARD');
   if(reference){
    try{
     if(["move","click","drag","notepad_write"].includes(p.action))moveDeps.mapScreenshotPoint(reference.image,a.x,a.y);
@@ -66,6 +68,9 @@ class OmniMoveBroker extends moveDeps.OmniDesktopBroker {
    const ack=await this.client.execute(p.action,args);
    if(!this.isCurrent(s))return {stale_dropped:true};
    if(ack?.ok!==true||ack.result?.status!=="executed")throw Error("INVALID_ACTION_RESULT");
+   if(['click','drag','notepad_write'].includes(p.action))s.targetConfirmed=true;
+   await new Promise(resolve=>setTimeout(resolve,POST_INPUT_SETTLE_MS));
+   if(!this.isCurrent(s))return {stale_dropped:true};
    const result=await this.client.execute("screenshot",{});
    if(!this.isCurrent(s))return {stale_dropped:true};
    s.requests.set(m.request_id,{status:"completed"});

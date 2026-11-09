@@ -108,6 +108,7 @@ const OmniPerplexityDelivery=(()=>{
    const img=attached[0];
    if(!visible(img)){lastDiag='ATTACHMENT_NOT_VISIBLE';continue;}
    if(!img.complete||img.naturalWidth<=0||img.naturalHeight<=0){lastDiag='ATTACHMENT_NOT_LOADED';continue;}
+   try{if(currentEditors[0]?.isConnected)currentEditors[0].blur();}catch{}
    return {state:'SENT_WITH_ATTACHMENT_OBSERVED',request_id:id};
   }
   fail('SEND_UNCERTAIN_HALT_NO_RETRY:req='+id+':phase=post_click:'+lastDiag);

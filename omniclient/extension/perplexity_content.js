@@ -31,6 +31,12 @@
   if(seen.size>=500){session=null;chrome.runtime.sendMessage({type:'desktop-stop'}).catch(()=>{});show('OmniNode: limite richieste raggiunto.');return;}
   seen.add(command.request_id);busy=true;
   try{
+   const activeEl=document.activeElement;
+   const isComposer=activeEl instanceof Element&&activeEl.matches('[contenteditable="true"][role="textbox"]');
+   if(isComposer){
+    try{activeEl.blur();}catch{}
+    if(['type','press','hotkey'].includes(command.action)&&document.activeElement===activeEl)throw Error('COMPOSER_FOCUS_TRAP_REFUSED');
+   }
    const response=await chrome.runtime.sendMessage({type:'ai-bridge-request',activation_id:s.activation_id,request_id:command.request_id,issued_at:Date.now(),stream_state:'settled',payload:{action:command.action,args:command.args}});
    if(!active(s))return;
    if(response?.ok!==true||response.request_id!==command.request_id||response.activation_id!==s.activation_id)throw Error(response?.code||'RESULT_CORRELATION_FAILED');

@@ -1,7 +1,9 @@
 """Deterministic, cooperative desktop backend. No listeners or anti-bot behavior."""
+import hashlib
 import io
 import math
 import sys
+import time
 
 
 def plan_eased_path(x0, y0, x1, y1, width, height, steps=20):
@@ -214,6 +216,19 @@ def make_windows_backend():
         _anonymous_ = ("data",)
         _fields_ = [("type", w.DWORD), ("data", U)]
 
+    class GUITHREADINFO(ctypes.Structure):
+        _fields_ = [
+            ("cbSize", w.DWORD),
+            ("flags", w.DWORD),
+            ("hwndActive", w.HWND),
+            ("hwndFocus", w.HWND),
+            ("hwndCapture", w.HWND),
+            ("hwndMenuOwner", w.HWND),
+            ("hwndMoveSize", w.HWND),
+            ("hwndCaret", w.HWND),
+            ("rcCaret", w.RECT),
+        ]
+
     user = ctypes.WinDLL("user32", use_last_error=True)
     user.SendInput.argtypes = [w.UINT, ctypes.POINTER(Input), ctypes.c_int]
     user.SendInput.restype = w.UINT
@@ -228,6 +243,14 @@ def make_windows_backend():
     user.IsWindow.restype = w.BOOL
     user.GetWindowThreadProcessId.argtypes = [w.HWND, ctypes.POINTER(w.DWORD)]
     user.GetWindowThreadProcessId.restype = w.DWORD
+    user.GetGUIThreadInfo.argtypes = [w.DWORD, ctypes.POINTER(GUITHREADINFO)]
+    user.GetGUIThreadInfo.restype = w.BOOL
+    user.GetClassNameW.argtypes = [w.HWND, ctypes.c_wchar_p, ctypes.c_int]
+    user.GetClassNameW.restype = ctypes.c_int
+    user.GetWindowRect.argtypes = [w.HWND, ctypes.POINTER(w.RECT)]
+    user.GetWindowRect.restype = w.BOOL
+    user.SendMessageTimeoutW.argtypes = [w.HWND, w.UINT, w.WPARAM, w.LPARAM, w.UINT, w.UINT, ctypes.POINTER(w.DWORD_PTR)]
+    user.SendMessageTimeoutW.restype = w.BOOL
 
     class Native:
         def emit(self, entries):
@@ -244,20 +267,77 @@ def make_windows_backend():
                 raise PermissionError("target process unavailable")
             return (int(hwnd), pid.value)
 
+        def _thread_of(self, hwnd):
+            pid = w.DWORD()
+            thread = user.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+            if not thread or not pid.value:
+                raise PermissionError("target thread unavailable")
+            return int(thread), int(pid.value)
+
+        def _gui(self, thread):
+            info = GUITHREADINFO()
+            info.cbSize = ctypes.sizeof(info)
+            if not user.GetGUIThreadInfo(thread, ctypes.byref(info)):
+                raise PermissionError("target thread unavailable")
+            return info
+
+        def _window_signature(self, hwnd):
+            cls = ctypes.create_unicode_buffer(256)
+            if not user.GetClassNameW(hwnd, cls, 256):
+                raise PermissionError("target class unavailable")
+            rect = w.RECT()
+            if not user.GetWindowRect(hwnd, ctypes.byref(rect)):
+                raise PermissionError("target geometry unavailable")
+            payload = (cls.value + "|" + str(rect.left) + "," + str(rect.top) + "," + str(rect.right) + "," + str(rect.bottom)).encode("utf-16-le")
+            return hashlib.sha256(payload).hexdigest()
+
+        def _rich_identity(self, hwnd):
+            base = self.identity(hwnd)
+            thread, pid = self._thread_of(hwnd)
+            info = self._gui(thread)
+            focus = int(info.hwndFocus or 0)
+            if not focus or not user.IsWindow(focus):
+                raise PermissionError("target focus unavailable")
+            focus_pid = w.DWORD()
+            focus_thread = user.GetWindowThreadProcessId(focus, ctypes.byref(focus_pid))
+            if not focus_pid.value or focus_pid.value != pid or focus_thread != thread:
+                raise PermissionError("target focus belongs to another thread")
+            return (base[0], focus, thread, pid, self._window_signature(focus))
+
         def target_at(self, x, y):
             hwnd = user.GetAncestor(user.WindowFromPoint(w.POINT(x, y)), 2)
-            return self.identity(hwnd)
+            return self._rich_identity(hwnd)
 
         def assert_focus(self, target):
-            if target is None or self.identity(target[0]) != target or int(user.GetForegroundWindow() or 0) != target[0]:
+            if target is None:
+                raise PermissionError("select target with an explicitly confirmed click first")
+            if self._rich_identity(target[0]) != target:
+                raise PermissionError("target identity or focus changed; no input delivered")
+            if int(user.GetForegroundWindow() or 0) != target[0]:
                 raise PermissionError("target focus changed; no input delivered")
 
         def focus(self, target):
-            if self.identity(target[0]) != target:
+            if self._rich_identity(target[0]) != target:
                 raise PermissionError("target identity changed")
             if int(user.GetForegroundWindow() or 0) != target[0]:
                 user.SetForegroundWindow(target[0])
             self.assert_focus(target)
+
+        def await_ready(self, target, timeout_ms=500):
+            deadline = time.monotonic() + max(timeout_ms, 0) / 1000.0
+            last = None
+            while time.monotonic() < deadline:
+                self.assert_focus(target)
+                info = self._gui(target[2])
+                state = (int(info.hwndFocus or 0), int(info.hwndActive or 0), int(info.hwndCapture or 0))
+                if state == last:
+                    result = w.DWORD_PTR()
+                    if not user.SendMessageTimeoutW(target[0], 0, 0, 0, 2, 250, ctypes.byref(result)):
+                        raise PermissionError("target message loop unavailable; no input delivered")
+                    return True
+                last = state
+                time.sleep(0.025)
+            raise PermissionError("target not stable; no input delivered")
 
         def release(self, kind, value):
             if kind == "mouse":
@@ -273,17 +353,14 @@ def make_windows_backend():
         def write(self, char):
             raw.failSafeCheck()
             encoded = char.encode("utf-16-le", errors="strict")
-            for offset in range(0, len(encoded), 2):
-                unit = int.from_bytes(encoded[offset:offset + 2], "little")
-                up = Input(type=1, ki=KI(scan=unit, flags=6))
-                try:
-                    self.emit([Input(type=1, ki=KI(scan=unit, flags=4)), up])
-                except Exception:
-                    try:
-                        self.emit([up])
-                    except Exception:
-                        pass
-                    raise
+            units = [int.from_bytes(encoded[i:i + 2], "little") for i in range(0, len(encoded), 2)]
+            events = []
+            for unit in units:
+                events.append(Input(type=1, ki=KI(scan=unit, flags=4)))
+                events.append(Input(type=1, ki=KI(scan=unit, flags=6)))
+            if not events:
+                raise ValueError("empty character")
+            self.emit(events)
 
     native = Native()
     raw.FAILSAFE = True

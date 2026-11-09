@@ -57,13 +57,13 @@ function buildDocument(attachmentCount,resultText){
  message.setQuery('[class~="group/user-bubble"]',[bubble]);
  message.setQuery('[data-workflow-final-text],[contenteditable="true"]',[]);
  bubble.parentElement=message;
- const state={sent:false};
+ const state={sent:false,previewShown:false};
  send.click=()=>{state.sent=true;editor.textContent='';bubble.textContent=resultText;};
  const doc={
   querySelectorAll(selector){
    if(selector==='[contenteditable="true"][role="textbox"]')return [editor];
    if(selector==='input[type="file"]')return [fileInput];
-   if(selector==='img')return state.sent?[preview]:[];
+   if(selector==='img')return state.previewShown?[preview]:[];
    if(selector==='[aria-busy="true"],[role="progressbar"]')return [];
    if(selector==='[role="alert"]')return [];
    if(selector==='[class~="group/user-bubble"]')return state.sent?[bubble]:[];
@@ -76,7 +76,7 @@ function buildDocument(attachmentCount,resultText){
   },
   execCommand:(command,_,text)=>{editor.textContent=text;return true;},
  };
- fileInput.dispatchEvent=()=>{scope.setQuery('img',[preview]);};
+ fileInput.dispatchEvent=()=>{state.previewShown=true;scope.setQuery('img',[preview]);};
  return {doc,send:()=>state.sent};
 }
 

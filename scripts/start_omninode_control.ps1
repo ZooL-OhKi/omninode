@@ -9,7 +9,9 @@ $ErrorActionPreference = "Stop"
 
 if (-not $Token) {
   $bytes = New-Object byte[] 32
-  [System.Security.Cryptography.RandomNumberGenerator]::Fill($bytes)
+  $rng = [System.Security.Cryptography.RNGCryptoServiceProvider]::Create()
+  $rng.GetBytes($bytes)
+  $rng.Dispose()
   $Token = ($bytes | ForEach-Object { $_.ToString("x2") }) -join ""
 }
 

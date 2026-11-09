@@ -6,7 +6,7 @@ function omniConversation(raw){const u=new URL(raw);if(u.protocol!=="https:"||u.
 class OmniDesktopBroker {
   constructor(api,client,options={}){
     this.api=api;this.client=client;this.owner=null;this.session=null;this.activation=null;this.epoch=0;this.opening=false;this.helpers=new Set();this.requests=new Map();
-    this.activationTtl=options.activationTtl??600000;this.maxRequests=options.maxRequests??20;
+    this.activationTtl=options.activationTtl??86400000;this.maxRequests=options.maxRequests??20;
     this.tokenFactory=options.tokenFactory??(()=>{const b=new Uint8Array(32);globalThis.crypto.getRandomValues(b);return Array.from(b,x=>x.toString(16).padStart(2,"0")).join("");});
   }
   trusted(s){return s?.id===this.api.runtime.id&&s.url===this.api.runtime.getURL("desktop.html")&&!s.tab;}

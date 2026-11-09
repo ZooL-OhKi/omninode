@@ -14,6 +14,28 @@ def validate_peer(peer, expected):
         raise PermissionError("native extension origin not configured or mismatched")
 
 
+def run_lab(first):
+    from windows_input_backend import configure_dpi
+    configure_dpi()
+    from desktop_control import DesktopSession, windows_backend
+    ttl = int(os.environ.get("OMNINODE_LAB_TTL", "900"))
+    ttl = max(1, min(ttl, 86400))
+    session = DesktopSession(windows_backend(), first["conversation"], ttl=ttl)
+    channel = DesktopChannel(session, first["conversation"])
+    write_message(sys.stdout.buffer, {"ok": True, "session_id": channel.session_id, "next_sequence": 0})
+    while True:
+        message = read_message(sys.stdin.buffer)
+        if message is None:
+            return
+        try:
+            result = channel.handle(message)
+            write_message(sys.stdout.buffer, {"ok": True, **result})
+        except Exception:
+            channel.stop()
+            write_message(sys.stdout.buffer, {"ok": False, "error": "desktop operation failed; session stopped; do not retry input"})
+            return
+
+
 def main():
     validate_peer(sys.argv[1] if len(sys.argv) > 1 else "",
                   os.environ.get("OMNINODE_NATIVE_ORIGIN", ""))
@@ -24,6 +46,9 @@ def main():
     msvcrt.setmode(sys.stdout.fileno(), os.O_BINARY)
     first = initial_request(sys.stdin.buffer, sys.stdout.buffer)
     if first is None:
+        return
+    if os.environ.get("OMNINODE_LAB_MODE") == "1":
+        run_lab(first)
         return
     from windows_input_backend import configure_dpi
     configure_dpi()

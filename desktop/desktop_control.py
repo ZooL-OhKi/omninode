@@ -14,7 +14,7 @@ SCHEMAS = {"screenshot": set(), "move": {"x", "y"}, "click": {"x", "y", "button"
 
 class DesktopSession:
     def __init__(self, backend, conversation, ttl=600, clock=time.monotonic):
-        if not isinstance(conversation, str) or not conversation or not 1 <= ttl <= 900:
+        if not isinstance(conversation, str) or not conversation or not 1 <= ttl <= 86400:
             raise ValueError("invalid local grant")
         self._backend = backend
         self._executor = backend if isinstance(backend, WindowsInputBackend) else WindowsInputBackend(backend)

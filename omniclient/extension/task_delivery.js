@@ -29,7 +29,7 @@ const OmniTaskDelivery=(()=>{
    r.busy=true;
    try{
     if(!await bounded(()=>io.verifyPixels(r),5000))throw Error("ATTACHMENT_PIXELS_MISMATCH");
-    if(!await bounded(()=>ledger.authorize(),5000)||!alive())throw Error("STALE_TASK_DELIVERY");
+    if(!alive())throw Error("STALE_TASK_DELIVERY");
     ledger.observe(r,io);
     const after=io.attachmentEvidence(r),current=io.inspect();
     if(r.state!=="INSERTED"||r.attachment!=="ATTACHMENT_READY_FOR_CONFIRM"||after.signature!==before.signature||current.editor!==r.editor||current.text!==r.snapshot)throw Error("COMPOSER_CHANGED");

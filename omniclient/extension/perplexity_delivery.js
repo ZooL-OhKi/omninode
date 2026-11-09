@@ -6,6 +6,12 @@ const OmniPerplexityDelivery=(()=>{
  function imageBaseline(doc){return new Set([...doc.querySelectorAll('img')].map(source).filter(Boolean));}
  function previewCandidates(doc,baseline){return [...doc.querySelectorAll('img')].filter(x=>visible(x)&&x.complete&&x.naturalWidth>0&&x.naturalHeight>0&&source(x)&&!baseline.has(source(x))&&!x.closest('[data-workflow-final-text],[class~="group/user-bubble"]'));}
  function sendReady({fileAssigned,previewReady,loading,alert,buttonReady}){return fileAssigned===true&&previewReady===true&&loading===false&&alert===false&&buttonReady===true;}
+ function makeResultText(image,id){
+  const action=image.completed_action;
+  if(!['screenshot','move'].includes(action)||image.observation_id!==id||!Number.isSafeInteger(image.observed_at_ms)||image.observed_at_ms<0||!Number.isSafeInteger(image.observation_ttl_ms)||image.observation_ttl_ms<1||image.coord_space!=='image_pixels')throw Error('INVALID_OBSERVATION_METADATA');
+  if(![image.width,image.height,image.source_width,image.source_height].every(x=>Number.isSafeInteger(x)&&x>0)||image.width>1280||image.height>800||image.source_width<image.width||image.source_height<image.height)throw Error('INVALID_OBSERVATION_GEOMETRY');
+  return JSON.stringify({omninode_response:true,request_id:id,status:'ok',completed_action:action,execution_status:action==='move'?'executed':'observed',observation_id:image.observation_id,observed_at_ms:image.observed_at_ms,observation_ttl_ms:image.observation_ttl_ms,coord_space:image.coord_space,width:image.width,height:image.height,source_width:image.source_width,source_height:image.source_height});
+ }
  async function insertVerified(editor,text,isActive,doc,options={}){
   const wait=options.wait|| (ms=>new Promise(r=>setTimeout(r,ms)));
   const guard=()=>{if(!isActive())throw Error('INSERT_SESSION_CHANGED');if(!editor.isConnected)throw Error('INSERT_EDITOR_REPLACED');};
@@ -47,7 +53,7 @@ const OmniPerplexityDelivery=(()=>{
   const loading=()=>[...scope.querySelectorAll('[aria-busy="true"],[role="progressbar"]')].some(visible);
   const alerts=()=>[...scope.querySelectorAll('[role="alert"]')].some(visible);
   if(read(editor)||images().length||loading()||alerts()||input.files?.length)fail('DRAFT_PROTECTED_HOLD');
-  const text=JSON.stringify({omninode_response:true,request_id:id,status:'ok',completed_action:'screenshot',width:image.width,height:image.height});
+  const text=makeResultText(image,id);
   const file=OmniTextDelivery.screenshotFile(image,id);
   const before=new Set(doc.querySelectorAll('[class~="group/user-bubble"]'));
   show('OmniNode: inserimento risultato; verifica composer.');
@@ -90,6 +96,6 @@ const OmniPerplexityDelivery=(()=>{
   }
   fail('SEND_UNCERTAIN_HALT_NO_RETRY');
  }
- return {accepts,deliver,insertVerified,imageBaseline,previewCandidates,sendReady};
+ return {accepts,deliver,insertVerified,imageBaseline,previewCandidates,sendReady,makeResultText};
 })();
 if(typeof module!=='undefined'&&module.exports)module.exports=OmniPerplexityDelivery;else globalThis.OmniPerplexityDelivery=OmniPerplexityDelivery;

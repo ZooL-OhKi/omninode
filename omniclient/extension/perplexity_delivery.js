@@ -2,6 +2,9 @@
 const OmniPerplexityDelivery=(()=>{
  const visible=x=>Boolean(x?.isConnected&&x.getClientRects().length);
  const read=editor=>(editor.textContent||'').trim();
+ const source=x=>x.currentSrc||x.src||'';
+ function imageBaseline(doc){return new Set([...doc.querySelectorAll('img')].map(source).filter(Boolean));}
+ function previewCandidates(doc,baseline){return [...doc.querySelectorAll('img')].filter(x=>visible(x)&&x.complete&&x.naturalWidth>0&&x.naturalHeight>0&&source(x)&&!baseline.has(source(x))&&!x.closest('[data-workflow-final-text],[class~="group/user-bubble"]'));}
  async function insertVerified(editor,text,isActive,doc,options={}){
   const wait=options.wait|| (ms=>new Promise(r=>setTimeout(r,ms)));
   const guard=()=>{if(!isActive())throw Error('INSERT_SESSION_CHANGED');if(!editor.isConnected)throw Error('INSERT_EDITOR_REPLACED');};
@@ -50,28 +53,35 @@ const OmniPerplexityDelivery=(()=>{
   await insertVerified(editor,text,isActive,doc);
   const intact=()=>{guard();if(!editor.isConnected||read(editor)!==text)fail('DRAFT_CHANGED');};
   intact();if(images().length||input.files?.length||loading()||alerts())fail('ATTACHMENT_CHANGED');
+  const baseline=imageBaseline(doc);
   const transfer=new DataTransfer();transfer.items.add(file);
   input.files=transfer.files;
   if(input.files.length!==1||input.files[0].name!==file.name)fail('FILE_ASSIGNMENT_FAILED');
-  show('OmniNode: caricamento screenshot; nessun invio finche non verificato.');
+  show('OmniNode: caricamento screenshot; verifica anteprima nella pagina.');
   input.dispatchEvent(new Event('change',{bubbles:true,composed:true}));
-  let preview=null,signature='',stable=0;
-  for(let i=0;i<150;i++){
+  let preview=null,signature='',stable=0,candidateCount=0;
+  for(let i=0;i<300;i++){
    await sleep(100);intact();if(alerts())fail('UPLOAD_ALERT');
-   const list=images(),img=list.length===1?list[0]:null;
-   const ready=img?.complete&&img.naturalWidth>0&&img.naturalHeight>0&&!loading();
-   const next=ready?JSON.stringify([img.currentSrc||img.src,img.naturalWidth,img.naturalHeight]):'';
+   const list=previewCandidates(doc,baseline);candidateCount=list.length;
+   const img=list.length===1?list[0]:null;
+   const next=img&&!loading()?JSON.stringify([source(img),img.naturalWidth,img.naturalHeight]):'';
    stable=next&&next===signature?stable+1:0;signature=next;
    if(stable>=10){preview=img;break;}
   }
-  if(!preview)fail('UPLOAD_PREVIEW_UNCERTAIN_NO_RETRY');
+  if(!preview)fail('UPLOAD_PREVIEW_UNCERTAIN_CANDIDATES_'+candidateCount+'_NO_RETRY');
   let timer;
   try{const match=await Promise.race([OmniTaskDelivery.comparePixels(image,preview,doc),new Promise((_,reject)=>{timer=setTimeout(()=>reject(Error('PIXEL_CHECK_TIMEOUT')),5000);})]);if(!match)fail('UPLOAD_PIXELS_MISMATCH');}finally{clearTimeout(timer);}
-  intact();
-  if(images().length!==1||images()[0]!==preview||loading()||alerts()||JSON.stringify([preview.currentSrc||preview.src,preview.naturalWidth,preview.naturalHeight])!==signature)fail('ATTACHMENT_CHANGED');
-  const buttons=[...scope.querySelectorAll('button[aria-label="Invia"]')].filter(x=>visible(x)&&!x.disabled&&x.getAttribute('aria-disabled')!=='true');
-  if(buttons.length!==1)fail('SEND_NOT_READY');
-  guard();buttons[0].click();show('OmniNode: invio richiesto; verifica messaggio con allegato.');
+  const attachmentIntact=()=>{intact();const list=previewCandidates(doc,baseline);if(list.length!==1||list[0]!==preview||loading()||alerts()||JSON.stringify([source(preview),preview.naturalWidth,preview.naturalHeight])!==signature)fail('ATTACHMENT_CHANGED');};
+  let send=null;
+  for(let i=0;i<50;i++){
+   attachmentIntact();
+   const buttons=[...scope.querySelectorAll('button[aria-label="Invia"]')].filter(x=>visible(x)&&!x.disabled&&x.getAttribute('aria-disabled')!=='true');
+   if(buttons.length===1){send=buttons[0];break;}
+   if(buttons.length>1)fail('SEND_AMBIGUOUS');
+   await sleep(100);
+  }
+  if(!send)fail('SEND_NOT_READY');
+  attachmentIntact();send.click();show('OmniNode: invio richiesto; verifica messaggio con allegato.');
   for(let i=0;i<100;i++){
    await sleep(100);guard();
    const outgoing=[...doc.querySelectorAll('[class~="group/user-bubble"]')].filter(x=>!before.has(x)&&[x,...x.querySelectorAll('*')].some(y=>y.textContent.trim()===text));
@@ -81,6 +91,6 @@ const OmniPerplexityDelivery=(()=>{
   }
   fail('SEND_UNCERTAIN_HALT_NO_RETRY');
  }
- return {accepts,deliver,insertVerified};
+ return {accepts,deliver,insertVerified,imageBaseline,previewCandidates};
 })();
 if(typeof module!=='undefined'&&module.exports)module.exports=OmniPerplexityDelivery;else globalThis.OmniPerplexityDelivery=OmniPerplexityDelivery;

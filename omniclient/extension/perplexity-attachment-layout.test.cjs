@@ -33,7 +33,7 @@ function observation(id){
  };
 }
 
-function buildDocument(attachmentCount){
+function buildDocument(attachmentCount,resultText){
  const editor=element({attrs:{contenteditable:'true',role:'textbox'}});
  editor.focus=()=>{};
  editor.addEventListener=()=>{};
@@ -58,7 +58,7 @@ function buildDocument(attachmentCount){
  message.setQuery('[data-workflow-final-text],[contenteditable="true"]',[]);
  bubble.parentElement=message;
  const state={sent:false};
- send.click=()=>{state.sent=true;editor.textContent='';};
+ send.click=()=>{state.sent=true;editor.textContent='';bubble.textContent=resultText;};
  const doc={
   querySelectorAll(selector){
    if(selector==='[contenteditable="true"][role="textbox"]')return [editor];
@@ -81,9 +81,11 @@ function buildDocument(attachmentCount){
 }
 
 test('sibling attachment beside outgoing bubble is recognized once',async()=>{
- const env=buildDocument(1);
+ const image=observation('sibling-1');
+ const resultText=delivery.makeResultText(image,'sibling-1');
+ const env=buildDocument(1,resultText);
  const result=await delivery.deliver({
-  image:observation('sibling-1'),id:'sibling-1',
+  image,id:'sibling-1',
   isActive:()=>true,show:()=>{},
  },env.doc);
  assert.equal(result.state,'SENT_WITH_ATTACHMENT_OBSERVED');
@@ -92,9 +94,11 @@ test('sibling attachment beside outgoing bubble is recognized once',async()=>{
 });
 
 test('missing sibling attachment halts without retry',async()=>{
- const env=buildDocument(0);
+ const image=observation('sibling-0');
+ const resultText=delivery.makeResultText(image,'sibling-0');
+ const env=buildDocument(0,resultText);
  await assert.rejects(delivery.deliver({
-  image:observation('sibling-0'),id:'sibling-0',
+  image,id:'sibling-0',
   isActive:()=>true,show:()=>{},
  },env.doc),/SEND_UNCERTAIN_HALT_NO_RETRY:req=sibling-0:phase=post_click:ATTACHMENT_COUNT_0/);
  assert.equal(env.send(),true);

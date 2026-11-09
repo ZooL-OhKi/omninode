@@ -1,11 +1,11 @@
 {
   "manifest_version": 3,
   "name": "OmniNode Bridge",
-  "version": "0.3.2",
-  "description": "Bridge desktop locale. Attivazione Perplexity e controllo Gemini; consegna automatica Perplexity non ancora implementata.",
+  "version": "0.3.3",
+  "description": "Bridge desktop locale. Attivazione Perplexity, screenshot e consegna testuale del risultato.",
   "permissions": ["activeTab", "tabs", "nativeMessaging"],
-  "background": {"service_worker": "service_worker.js"},
-  "action": {"default_title": "OmniNode Desktop", "default_popup": "desktop.html"},
+  "background": { "service_worker": "service_worker.js" },
+  "action": { "default_title": "OmniNode Desktop", "default_popup": "desktop.html" },
   "content_scripts": [
     {
       "matches": ["https://gemini.google.com/*"],
@@ -14,7 +14,7 @@
     },
     {
       "matches": ["https://perplexity.ai/*", "https://www.perplexity.ai/*"],
-      "js": ["perplexity_content.js"],
+      "js": ["action_policy.js", "perplexity_adapter.js", "perplexity_content.js"],
       "run_at": "document_idle",
       "all_frames": false
     }

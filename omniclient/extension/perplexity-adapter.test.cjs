@@ -1,0 +1,14 @@
+"use strict";
+const assert = require("node:assert/strict");
+const { omniIsCompleted, omniExtractResponseText, omniParseCommand, omniBuildResultMessage } = require("./perplexity_adapter.js");
+const policy = require("./action_policy.js");
+assert.equal(omniParseCommand("testo senza comando", policy), null);
+assert.equal(omniParseCommand("```json\n{\"action\":\"click\"}\n```", policy), null);
+assert.equal(omniParseCommand("```json\n{\"request_id\":\"short\",\"action\":\"screenshot\",\"args\":{}}\n```", policy), null);
+const valid = omniParseCommand("```json\n{\"request_id\":\"omni-test-0001\",\"action\":\"screenshot\",\"args\":{}}\n```", policy);
+assert.deepEqual(valid, { request_id: "omni-test-0001", action: "screenshot", args: {} });
+assert.equal(omniIsCompleted({ querySelector: () => ({}) }), true);
+assert.equal(omniIsCompleted(null), false);
+assert.equal(omniExtractResponseText({ querySelector: () => ({ textContent: "  OmniNode pronto  " }) }), "OmniNode pronto");
+assert.equal(omniBuildResultMessage(valid, { result: { result: { width: 800, height: 600 } } }), "OmniNode omni-test-0001: screenshot acquisito (800x600).");
+console.log("perplexity adapter tests passed");

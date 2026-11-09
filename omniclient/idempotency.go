@@ -7,10 +7,18 @@ import (
 	"sync"
 )
 
+const (
+	StatusPrepared                   = "prepared"
+	StatusDispatchedInFlight         = "dispatched_in_flight"
+	StatusCompleted                  = "completed"
+	StatusFailed                     = "failed"
+	StatusCrashUncertainHaltNoRetry  = "crash_uncertain_halt_no_retry"
+)
+
 // TaskRecord traccia lo stato di esecuzione locale di un task per garantire idempotenza.
 type TaskRecord struct {
 	TaskID string `json:"task_id"`
-	Status string `json:"status"` // "completed", "failed"
+	Status string `json:"status"`
 	Result string `json:"result,omitempty"`
 }
 
@@ -33,6 +41,9 @@ func NewIdempotencyStore(workspaceRoot string) (*LocalIdempotencyStore, error) {
 		cache: make(map[string]TaskRecord),
 	}
 	store.load()
+	if err := store.RecoverInFlight(); err != nil {
+		return nil, err
+	}
 	return store, nil
 }
 
@@ -54,7 +65,7 @@ func (s *LocalIdempotencyStore) load() {
 	}
 }
 
-// Has verifica se un task è già stato completato (idempotenza).
+// Has verifica se un task è già stato registrato.
 func (s *LocalIdempotencyStore) Has(taskID string) (bool, TaskRecord) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -62,31 +73,53 @@ func (s *LocalIdempotencyStore) Has(taskID string) (bool, TaskRecord) {
 	return exists, rec
 }
 
-// Save registra atomicamente il completamento di un task.
+// Save registra atomicamente lo stato di un task.
 func (s *LocalIdempotencyStore) Save(taskID, status, result string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-
 	s.cache[taskID] = TaskRecord{
 		TaskID: taskID,
 		Status: status,
 		Result: result,
 	}
+	return s.persistLocked()
+}
 
+// MarkDispatched persiste lo stato in-flight prima dell'effetto fisico.
+func (s *LocalIdempotencyStore) MarkDispatched(taskID string) error {
+	return s.Save(taskID, StatusDispatchedInFlight, "")
+}
+
+// RecoverInFlight trasforma ogni record in-flight al bootstrap in un arresto incerto.
+func (s *LocalIdempotencyStore) RecoverInFlight() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	changed := false
+	for id, r := range s.cache {
+		if r.Status == StatusDispatchedInFlight {
+			r.Status = StatusCrashUncertainHaltNoRetry
+			s.cache[id] = r
+			changed = true
+		}
+	}
+	if !changed {
+		return nil
+	}
+	return s.persistLocked()
+}
+
+func (s *LocalIdempotencyStore) persistLocked() error {
 	var records []TaskRecord
 	for _, r := range s.cache {
 		records = append(records, r)
 	}
-
 	data, err := json.MarshalIndent(records, "", "  ")
 	if err != nil {
 		return err
 	}
-
 	tmpFile := s.path + ".tmp"
 	if err := os.WriteFile(tmpFile, data, 0600); err != nil {
 		return err
 	}
-
 	return os.Rename(tmpFile, s.path)
 }

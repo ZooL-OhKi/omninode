@@ -8,6 +8,16 @@ class OmniDesktopBroker {
     this.api=api;this.client=client;this.owner=null;this.session=null;this.activation=null;this.epoch=0;this.opening=false;this.helpers=new Set();this.requests=new Map();
     this.activationTtl=options.activationTtl??86400000;this.maxRequests=options.maxRequests??500;
     this.tokenFactory=options.tokenFactory??(()=>{const b=new Uint8Array(32);globalThis.crypto.getRandomValues(b);return Array.from(b,x=>x.toString(16).padStart(2,"0")).join("");});
+    if(this.api.tabs?.onUpdated){
+      this.api.tabs.onUpdated.addListener((tabId,changeInfo)=>{
+        if(changeInfo?.url&&this.owner?.tabId===tabId)this.changed(tabId,changeInfo.url);
+      });
+    }
+    if(this.api.tabs?.onRemoved){
+      this.api.tabs.onRemoved.addListener((tabId)=>{
+        if(this.owner?.tabId===tabId)this.stop();
+      });
+    }
   }
   trusted(s){return s?.id===this.api.runtime.id;}
   stop(){this.epoch++;if(this.session){this.session.state="STOPPED";clearTimeout(this.session.timer);}this.session=null;this.owner=null;this.activation=null;this.opening=false;this.requests=new Map();this.helpers.clear();this.client.stop("Desktop session stopped; input is not retried");this.api.action.setBadgeText({text:""});}

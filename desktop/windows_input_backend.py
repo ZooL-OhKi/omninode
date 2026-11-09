@@ -68,6 +68,7 @@ class WindowsInputBackend:
             if self.target is None:
                 raise PermissionError("select target with an explicitly confirmed click first")
             self.native.focus(self.target)
+            self.native.await_ready(self.target)
         check()
 
     def _guard(self, check):

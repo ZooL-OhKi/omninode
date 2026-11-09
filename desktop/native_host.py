@@ -1,7 +1,9 @@
 """Windows native host: headless auto-consent mode, no GUI popups."""
 import os
+import queue
 import re
 import sys
+import threading
 from native_channel import DesktopChannel, read_message, write_message
 from native_bootstrap import initial_request
 
@@ -32,17 +34,43 @@ def main():
         session = DesktopSession(windows_backend(), first["conversation"], ttl=900)
         channel = DesktopChannel(session, first["conversation"])
         write_message(sys.stdout.buffer, {"ok": True, "session_id": channel.session_id, "next_sequence": 0})
+        messages = queue.Queue()
+
+        def reader():
+            try:
+                while True:
+                    message = read_message(sys.stdin.buffer)
+                    if message is None:
+                        messages.put(None)
+                        return
+                    if isinstance(message, dict) and message.get("type") == "control" and message.get("command") == "STOP":
+                        session.stop()
+                        messages.put({"__control__": "STOP"})
+                        return
+                    messages.put(message)
+            except Exception as exc:
+                session.stop()
+                messages.put(exc)
+
+        reader_thread = threading.Thread(target=reader, daemon=True)
+        reader_thread.start()
         while True:
-            message = read_message(sys.stdin.buffer)
+            message = messages.get()
             if message is None:
-                return
+                break
+            if isinstance(message, Exception):
+                raise message
+            if isinstance(message, dict) and message.get("__control__") == "STOP":
+                channel.stop()
+                write_message(sys.stdout.buffer, {"ok": True, "stopped": True})
+                break
             try:
                 result = channel.handle(message)
                 write_message(sys.stdout.buffer, {"ok": True, **result})
             except Exception as exc:
                 channel.stop()
                 write_message(sys.stdout.buffer, {"ok": False, "error": f"desktop operation failed: {exc}"})
-                return
+                break
     except Exception as exc:
         try:
             write_message(sys.stdout.buffer, {"ok": False, "error": f"initialization failed: {exc}"})

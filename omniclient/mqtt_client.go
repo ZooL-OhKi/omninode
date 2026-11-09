@@ -132,6 +132,8 @@ func NewMQTTClient(config WorkerConfig) (mqtt.Client, error) {
 			}
 			log.Printf("[MQTT] sottoscritto a %s", topic)
 		}
+
+		subscribeAgentTopics(client, config.NodeID)
 	})
 
 	return mqtt.NewClient(opts), nil

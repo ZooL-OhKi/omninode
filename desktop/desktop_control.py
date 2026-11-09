@@ -6,17 +6,10 @@ import time
 from windows_input_backend import WindowsInputBackend, make_windows_backend
 
 OP_BUDGET_SEC = 12.0
-SCHEMAS = {
-    "screenshot": set(),
-    "move": {"x", "y", "observation_id", "coord_space"},
-    "click": {"x", "y", "button", "observation_id", "coord_space"},
-    "scroll": {"steps"},
-    "press": {"key"},
-    "hotkey": {"keys"},
-    "type": {"text"},
-    "drag": {"x", "y", "to_x", "to_y", "observation_id", "coord_space"},
-    "notepad_write": {"x", "y", "text", "observation_id", "coord_space"},
-}
+SCHEMAS = {"screenshot": set(), "move": {"x", "y"}, "click": {"x", "y", "button"},
+           "scroll": {"steps"}, "press": {"key"}, "hotkey": {"keys"},
+           "type": {"text"}, "drag": {"x", "y", "to_x", "to_y"},
+           "notepad_write": {"x", "y", "text"}}
 
 
 class DesktopSession:
@@ -31,7 +24,6 @@ class DesktopSession:
         self._token = secrets.token_urlsafe(32)
         self._stop = threading.Event()
         self._lock = threading.Lock()
-        self._observation = None
 
     def credential(self):
         return self._token
@@ -47,16 +39,6 @@ class DesktopSession:
                 or not hmac.compare_digest(token.encode(), self._token.encode())):
             raise PermissionError("desktop grant absent, expired, stopped, or mismatched")
 
-    def _require_observation(self, args):
-        if not isinstance(args.get("observation_id"), str) or not args["observation_id"]:
-            raise ValueError("observation_id required")
-        if args.get("coord_space") not in {"primary_display_px", "image_px"}:
-            raise ValueError("unsupported coordinate space")
-        if self._observation is None or args["observation_id"] != self._observation["id"]:
-            raise PermissionError("observation mismatch; no input delivered")
-        if self._executor.display_topology() != self._observation["topology"]:
-            raise PermissionError("display topology changed; no input delivered")
-
     def _validate(self, action, args):
         if not isinstance(action, str) or action not in SCHEMAS or not isinstance(args, dict) or set(args) != SCHEMAS[action]:
             raise ValueError("unsupported action or invalid schema")
@@ -71,7 +53,6 @@ class DesktopSession:
                 raise ValueError("unsupported key")
 
         if action in {"move", "click", "drag", "notepad_write"}:
-            self._require_observation(args)
             point(args["x"], args["y"])
         if action == "drag":
             point(args["to_x"], args["to_y"])
@@ -120,17 +101,6 @@ class DesktopSession:
                     result = run_notepad_write(self._executor, args, check, wait)
                 else:
                     result = self._executor.perform(action, args, check, wait)
-                if action == "screenshot":
-                    observation_id = secrets.token_urlsafe(16)
-                    topology = self._executor.display_topology()
-                    self._observation = {
-                        "id": observation_id,
-                        "topology": topology,
-                        "width": result["width"],
-                        "height": result["height"],
-                    }
-                    result["observation_id"] = observation_id
-                    result["coord_space"] = "primary_display_px"
                 check()
                 return result
             except self._executor.raw.FailSafeException:

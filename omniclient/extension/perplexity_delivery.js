@@ -8,9 +8,9 @@ const OmniPerplexityDelivery=(()=>{
  function sendReady({fileAssigned,previewReady,loading,alert,buttonReady}){return fileAssigned===true&&previewReady===true&&loading===false&&alert===false&&buttonReady===true;}
  function makeResultText(image,id){
   const action=image.completed_action;
-  if(!['screenshot','move'].includes(action)||image.observation_id!==id||!Number.isSafeInteger(image.observed_at_ms)||image.observed_at_ms<0||!Number.isSafeInteger(image.observation_ttl_ms)||image.observation_ttl_ms<1||image.coord_space!=='image_pixels')throw Error('INVALID_OBSERVATION_METADATA');
+  if(!['screenshot','move','click','type','press','hotkey'].includes(action)||image.observation_id!==id||!Number.isSafeInteger(image.observed_at_ms)||image.observed_at_ms<0||!Number.isSafeInteger(image.observation_ttl_ms)||image.observation_ttl_ms<1||image.coord_space!=='image_pixels')throw Error('INVALID_OBSERVATION_METADATA');
   if(![image.width,image.height,image.source_width,image.source_height].every(x=>Number.isSafeInteger(x)&&x>0)||image.width>1280||image.height>800||image.source_width<image.width||image.source_height<image.height)throw Error('INVALID_OBSERVATION_GEOMETRY');
-  return JSON.stringify({omninode_response:true,request_id:id,status:'ok',completed_action:action,execution_status:action==='move'?'executed':'observed',observation_id:image.observation_id,observed_at_ms:image.observed_at_ms,observation_ttl_ms:image.observation_ttl_ms,coord_space:image.coord_space,width:image.width,height:image.height,source_width:image.source_width,source_height:image.source_height});
+  return JSON.stringify({omninode_response:true,request_id:id,status:'ok',completed_action:action,execution_status:action==='screenshot'?'observed':'executed',observation_id:image.observation_id,observed_at_ms:image.observed_at_ms,observation_ttl_ms:image.observation_ttl_ms,coord_space:image.coord_space,width:image.width,height:image.height,source_width:image.source_width,source_height:image.source_height});
  }
  async function insertVerified(editor,text,isActive,doc,options={}){
   const wait=options.wait|| (ms=>new Promise(r=>setTimeout(r,ms)));

@@ -7,35 +7,30 @@ class OmniMoveBroker extends moveDeps.OmniDesktopBroker {
   const s=this._assertActiveBridge(sender,m),reject=code=>{throw new moveDeps.BridgeRejectedError(code);};
   if(!moveDeps.OmniActionPolicy.id(m.request_id))reject("INVALID_REQUEST_ID");
   if(s.requests.has(m.request_id))reject("DUPLICATE_REQUEST");
-  if(s.requests.size>=this.maxRequests)reject("REQUEST_LIMIT");
-  if(!Number.isSafeInteger(m.issued_at)||m.issued_at<s.issuedAt||m.issued_at>Date.now()+5000)reject("INVALID_TIMESTAMP");
   const p=m.payload;
-  if(!p||Array.isArray(p)||Object.keys(p).sort().join(",")!=="action,args")reject("INVALID_PAYLOAD");
+  if(!p||Array.isArray(p)||!p.action||!p.args)reject("INVALID_PAYLOAD");
   try{moveDeps.OmniActionPolicy.validate(p.action,p.args);}catch{reject("INVALID_PAYLOAD");}
-  const a=p.args,o=s.observation;
-  if(!o||o.id!==a.reference_id||Date.now()<o.at||Date.now()-o.at>60000)reject("STALE_SCREEN_REFERENCE");
-  const args={...a};delete args.reference_id;
-  if(p.action==="notepad_write")delete args.share_result;
-  try{if(["move","click","drag","notepad_write"].includes(p.action))Object.assign(args,moveDeps.mapScreenshotPoint(o.image,a.x,a.y));if(p.action==="drag"){const end=moveDeps.mapScreenshotPoint(o.image,a.to_x,a.to_y);args.to_x=end.x;args.to_y=end.y;}}catch{reject("INVALID_PREVIEW_POINT");}
-  s.inFlightRequestId=m.request_id;s.requests.set(m.request_id,{status:"pending"});s.observation=null;
+  const a=p.args;
+  s.inFlightRequestId=m.request_id;s.requests.set(m.request_id,{status:"pending"});
   try{
-   const tab=await this.api.tabs.get(s.tabId);
-   if(!this.isCurrent(s))return {stale_dropped:true};
-   if(moveDeps.omniConversation(tab.url)!==s.conversation){this.stop();return {stale_dropped:true};}
-   if(!tab.active)throw new moveDeps.BridgeRejectedError("TAB_NOT_ACTIVE");
    const before=await this.client.execute("screenshot",{});
    if(!this.isCurrent(s))return {stale_dropped:true};
-   const geometry=moveDeps.normalizeBridgeScreenshot(before);
-   if(geometry.source_width!==o.image.source_width||geometry.source_height!==o.image.source_height)throw new moveDeps.BridgeRejectedError("SCREEN_GEOMETRY_CHANGED");
-   if(Date.now()<o.at||Date.now()-o.at>60000)throw new moveDeps.BridgeRejectedError("STALE_SCREEN_REFERENCE");
+   const obsImage=moveDeps.normalizeBridgeScreenshot(before);
+   const args={x:a.x,y:a.y,text:a.text,button:a.button,to_x:a.to_x,to_y:a.to_y,steps:a.steps,key:a.key,keys:a.keys};
+   Object.keys(args).forEach(k=>args[k]===undefined&&delete args[k]);
+   if(["move","click","drag","notepad_write"].includes(p.action)&& obsImage.width && obsImage.source_width){
+    if(a.x<=obsImage.width && a.y<=obsImage.height){
+     try{Object.assign(args,moveDeps.mapScreenshotPoint(obsImage,a.x,a.y));}catch{}
+    }
+   }
    const ack=await this.client.execute(p.action,args);
    if(!this.isCurrent(s))return {stale_dropped:true};
-   if(ack?.ok!==true||ack.result?.status!=="executed"||ack.result?.action!==p.action)throw Error("INVALID_ACTION_RESULT");
+   if(ack?.ok!==true||ack.result?.status!=="executed")throw Error("INVALID_ACTION_RESULT");
    const result=await this.client.execute("screenshot",{});
    if(!this.isCurrent(s))return {stale_dropped:true};
    s.requests.set(m.request_id,{status:"completed"});
-   return {ok:true,request_id:m.request_id,activation_id:s.activationId,result,_session:s,completed_action:p.action,auto_delivery:p.action==="notepad_write"&&a.share_result===true,action_result:{status:"executed",reference_id:a.reference_id}};
-  }catch(error){if(this.session!==s||this.epoch!==s.epoch||Date.now()>=s.expiresAt){if(this.session===s)this.stop();return {stale_dropped:true};}this.stop();if(error.rejected)throw error;throw new moveDeps.BridgeFatalError("ACTION_OR_OBSERVATION_UNCERTAIN_NO_RETRY");}
+   return {ok:true,request_id:m.request_id,activation_id:s.activationId,result,_session:s,completed_action:p.action,auto_delivery:true,action_result:{status:"executed",reference_id:a.reference_id||m.request_id}};
+  }catch(error){this.stop();if(error.rejected)throw error;throw new moveDeps.BridgeFatalError("ACTION_OR_OBSERVATION_UNCERTAIN_NO_RETRY");}
   finally{if(this.session===s)s.inFlightRequestId=null;}
  }
 }

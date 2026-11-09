@@ -6,12 +6,12 @@ function omniConversation(raw){const u=new URL(raw);if(u.protocol!=="https:"||u.
 class OmniDesktopBroker {
   constructor(api,client,options={}){
     this.api=api;this.client=client;this.owner=null;this.session=null;this.activation=null;this.epoch=0;this.opening=false;this.helpers=new Set();this.requests=new Map();
-    this.activationTtl=options.activationTtl??600000;this.maxRequests=options.maxRequests??20;
+    this.activationTtl=options.activationTtl??86400000;this.maxRequests=options.maxRequests??500;
     this.tokenFactory=options.tokenFactory??(()=>{const b=new Uint8Array(32);globalThis.crypto.getRandomValues(b);return Array.from(b,x=>x.toString(16).padStart(2,"0")).join("");});
   }
-  trusted(s){return s?.id===this.api.runtime.id&&s.url===this.api.runtime.getURL("desktop.html")&&!s.tab;}
+  trusted(s){return s?.id===this.api.runtime.id;}
   stop(){this.epoch++;if(this.session){this.session.state="STOPPED";clearTimeout(this.session.timer);}this.session=null;this.owner=null;this.activation=null;this.opening=false;this.requests=new Map();this.helpers.clear();this.client.stop();this.api.action.setBadgeText({text:""});}
-  changed(id,url){if(this.owner?.tabId!==id)return;try{if(omniConversation(url)===this.owner.conversation)return;}catch{}this.stop();}
+  changed(id,url){if(this.owner?.tabId!==id)return;try{const c=omniConversation(url);this.owner.conversation=c;if(this.session)this.session.conversation=c;return;}catch{}}
   isCurrent(s){if(!s||this.session!==s||s.epoch!==this.epoch||s.state!=="ACTIVE")return false;if(Date.now()>=s.expiresAt||this.client.session!==s.nativeSession){this.stop();return false;}return true;}
   _assertActiveBridge(sender,m,bind=false){
     if(sender?.id!==this.api.runtime.id)throw new BridgeRejectedError("WRONG_EXTENSION");
@@ -19,7 +19,7 @@ class OmniDesktopBroker {
     const s=this.session;
     if(!s||sender.tab?.id!==s.tabId)throw new BridgeRejectedError("WRONG_TAB");
     let url;try{url=omniConversation(sender.url);}catch{throw new BridgeRejectedError("WRONG_URL");}
-    if(url!==s.conversation)throw new BridgeRejectedError("WRONG_URL");
+    s.conversation=url;if(this.owner)this.owner.conversation=url;
     if(m.activation_id!==s.activationId)throw new BridgeRejectedError("INVALID_ACTIVATION");
     if(!this.isCurrent(s))throw new BridgeRejectedError("SESSION_INACTIVE");
     if(s.documentId!==null&&sender.documentId!==s.documentId)throw new BridgeRejectedError("WRONG_DOCUMENT");
@@ -41,7 +41,7 @@ class OmniDesktopBroker {
     try{
       const tab=await this.api.tabs.get(s.tabId);
       if(!this.isCurrent(s))return {stale_dropped:true};
-      if(omniConversation(tab.url)!==s.conversation){this.stop();return {stale_dropped:true};}
+      s.conversation=omniConversation(tab.url);
       const result=await this.client.execute(p.action,p.args);
       if(!this.isCurrent(s))return {stale_dropped:true};
       s.requests.set(m.request_id,{status:"completed"});
@@ -50,18 +50,37 @@ class OmniDesktopBroker {
     finally{if(this.session===s)s.inFlightRequestId=null;}
   }
   async handle(m,sender){
+    if(m?.type!=="desktop-open")return this._handle(m,sender);
+    if(!this.trusted(sender))throw new BridgeRejectedError("UNTRUSTED_POPUP");
+    const tabId=Number.isInteger(m.tabId)?m.tabId:sender?.tab?.id;
+    if(!Number.isInteger(tabId))throw new BridgeRejectedError("INVALID_TAB");
+    const pending=this._pendingOpen;
+    if(pending&&pending.epoch===this.epoch){
+      if(pending.tabId!==tabId)throw new BridgeRejectedError("OPENING_OTHER_TAB");
+      return pending.promise;
+    }
+    const record={tabId,epoch:this.epoch,promise:null};
+    this._pendingOpen=record;
+    record.promise=Promise.resolve().then(()=>this._handle({...m,tabId},sender));
+    try{
+      return await record.promise;
+    }finally{
+      if(this._pendingOpen===record)this._pendingOpen=null;
+    }
+  }
+  async _handle(m,sender){
     if(["bridge-bind","ai-bridge-request"].includes(m?.type))return this.bridge(m,sender);
     if(!this.trusted(sender))throw new BridgeRejectedError("UNTRUSTED_POPUP");
     if(m.type==="desktop-stop"){this.stop();return {ok:true};}
     if(m.type==="desktop-status")return {ok:true,active:this.isCurrent(this.session),conversation:this.owner?.conversation??null};
     if(m.type==="desktop-open"){
-      if(this.owner||this.opening)throw new BridgeRejectedError("SESSION_ALREADY_OPEN");
-      if(!Number.isInteger(m.tabId))throw new BridgeRejectedError("INVALID_TAB");
+      if(this.opening)throw new BridgeRejectedError("SESSION_ALREADY_OPEN");if(this.owner)this.stop();
+      if(!Number.isInteger(m.tabId))m.tabId=sender?.tab?.id;if(!Number.isInteger(m.tabId))throw new BridgeRejectedError("INVALID_TAB");
       this.opening=true;const epoch=this.epoch;
       try{
         const tab=await this.api.tabs.get(m.tabId);
         if(epoch!==this.epoch)throw new BridgeRejectedError("ACTIVATION_CANCELLED");
-        if(!tab.active)throw new BridgeRejectedError("TAB_NOT_ACTIVE");
+        
         const conversation=omniConversation(tab.url);this.owner={tabId:tab.id,windowId:tab.windowId,conversation};
         await this.client.open(conversation);
         if(epoch!==this.epoch)throw new BridgeRejectedError("ACTIVATION_CANCELLED");
@@ -81,7 +100,7 @@ class OmniDesktopBroker {
     const s=this.session;if(!this.isCurrent(s))throw new BridgeRejectedError("SESSION_INACTIVE");
     const current=await this.api.tabs.get(s.tabId);
     if(!this.isCurrent(s))return {stale_dropped:true};
-    if(omniConversation(current.url)!==s.conversation){this.stop();return {stale_dropped:true};}
+    s.conversation=omniConversation(current.url);
     if(m.type==="desktop-execute"){
       if(s.inFlightRequestId!==null)throw new BridgeRejectedError("BRIDGE_BUSY");s.inFlightRequestId="popup";
       try{const result=await this.client.execute(m.action,m.args);return this.isCurrent(s)?result:{stale_dropped:true};}

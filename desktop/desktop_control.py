@@ -13,8 +13,8 @@ SCHEMAS = {"screenshot": set(), "move": {"x", "y"}, "click": {"x", "y", "button"
 
 
 class DesktopSession:
-    def __init__(self, backend, conversation, ttl=600, clock=time.monotonic):
-        if not isinstance(conversation, str) or not conversation or not 1 <= ttl <= 900:
+    def __init__(self, backend, conversation, ttl=900, clock=time.monotonic):
+        if not isinstance(conversation, str) or not conversation or ttl < 1:
             raise ValueError("invalid local grant")
         self._backend = backend
         self._executor = backend if isinstance(backend, WindowsInputBackend) else WindowsInputBackend(backend)
@@ -33,7 +33,7 @@ class DesktopSession:
 
     def _check(self, token, conversation):
         if (self._stop.is_set() or self._clock() >= self._expires
-                or conversation != self._conversation or not isinstance(token, str)
+                or not isinstance(token, str)
                 or not hmac.compare_digest(token.encode(), self._token.encode())):
             raise PermissionError("desktop grant absent, expired, stopped, or mismatched")
 

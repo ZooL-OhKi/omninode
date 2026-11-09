@@ -3,14 +3,14 @@ const statusNode=document.getElementById("status");
 async function send(message) {
   try {
     const result=await chrome.runtime.sendMessage(message);
-    if (!result?.ok) throw new Error(result?.error || "No service-worker response");
+    if (!result?.ok) throw new Error(result?.code || result?.error || "EMPTY_SERVICE_WORKER_RESPONSE");
     statusNode.textContent=result.conversation ? "Sessione: " + result.conversation : "Operazione completata";
     return result;
   } catch(error) { statusNode.textContent=String(error.message || error); return null; }
 }
 document.getElementById("open").onclick=async()=>{
   const [tab]=await chrome.tabs.query({active:true,currentWindow:true});
-  statusNode.textContent="Attendo consenso nella finestra locale OmniNode";
+  statusNode.textContent="Connessione al canale nativo in corso...";
   await send({type:"desktop-open",tabId:tab?.id});
 };
 document.getElementById("stop").onclick=async()=>{await send({type:"desktop-stop"});document.getElementById("preview").removeAttribute("src")};

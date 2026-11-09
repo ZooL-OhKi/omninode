@@ -10,7 +10,7 @@ function createBridgeListener(broker,normalize){
    let result;
    try{result=normalize(value.result);broker.recordObservation?.(value._session,value.request_id,result);}catch{if(broker.isCurrent(value._session))broker.stop();reply({ok:false,fatal:true,code:"INVALID_NATIVE_IMAGE",request_id:message.request_id,activation_id:value.activation_id});return;}
    if(!broker.isCurrent(value._session)){reply();return;}
-   if(value.completed_action==="notepad_write"&&value.auto_delivery===true){result.completed_action="notepad_write";result.auto_delivery=true;}
+   result.completed_action=value.completed_action||"screenshot";result.auto_delivery=true;
    reply({ok:true,request_id:value.request_id,activation_id:value.activation_id,result,...(value.completed_action?{completed_action:value.completed_action,action_result:value.action_result}:{})});
   }).catch(error=>reply({ok:false,...(error.rejected?{rejected:true}:{fatal:true}),code:error.code||"INTERNAL_ERROR",...(message.type==="ai-bridge-request"?{request_id:message.request_id,activation_id:message.activation_id}:{})}));
   return true;

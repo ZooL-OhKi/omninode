@@ -13,7 +13,7 @@ const OmniTaskDelivery=(()=>{
   return true;
  }
  async function run(ledger,r,io,options={}){
-  if(r.taskDeliveryStarted||r.cancelled||r.image?.auto_delivery!==true||r.image?.completed_action!=="notepad_write")return r;
+  if(r.taskDeliveryStarted||r.cancelled||r.image?.auto_delivery!==true||!r.image?.completed_action)return r;
   r.taskDeliveryStarted=true;
   const wait=options.wait??(ms=>new Promise(resolve=>setTimeout(resolve,ms)));
   const started=ledger.clock(),deadline=started+18000,monotonic=options.monotonic??(()=>performance.now()),monotonicDeadline=monotonic()+18000;

@@ -165,7 +165,7 @@ func executeAgentAction(session *WebSession, action AgentAction) ActionResult {
 			return result
 		}
 
-		result.URL, _ = session.page.URL()
+		result.URL = session.page.URL()
 		result.Title, _ = session.page.Title()
 
 	case "click":
@@ -240,7 +240,7 @@ func executeAgentAction(session *WebSession, action AgentAction) ActionResult {
 		}
 
 		result.Snapshot = snapshot
-		result.URL, _ = session.page.URL()
+		result.URL = session.page.URL()
 		result.Title, _ = session.page.Title()
 
 	case "screenshot":

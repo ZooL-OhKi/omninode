@@ -27,6 +27,10 @@ jobs:
           pip install -r requirements.txt
           pip install pytest pytest-asyncio httpx
 
+      - name: Install Playwright Chromium
+        working-directory: ./node1-gateway
+        run: python -m playwright install --with-deps chromium
+
       - name: Lint with flake8
         working-directory: ./node1-gateway
         run: |

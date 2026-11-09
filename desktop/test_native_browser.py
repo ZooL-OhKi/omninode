@@ -56,7 +56,7 @@ class NativeBrowserTest(unittest.IsolatedAsyncioTestCase):
                     worker = context.service_workers[0] if context.service_workers else await context.wait_for_event("serviceworker", timeout=10000)
                     extension_id = await worker.evaluate("chrome.runtime.id")
                     directory = profile / "NativeMessagingHosts"
-                    directory.mkdir()
+                    directory.mkdir(exist_ok=True)
                     (directory / "com.omninode.desktop.json").write_text(json.dumps({"name":"com.omninode.desktop","description":"isolated fixture only","path":str(host),"type":"stdio","allowed_origins":["chrome-extension://" + extension_id + "/"]}))
                     result = await worker.evaluate("""() => new Promise((resolve,reject)=>{
                       const port=chrome.runtime.connectNative('com.omninode.desktop');let handshake=null;
